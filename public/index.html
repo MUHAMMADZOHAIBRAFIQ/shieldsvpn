@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ShieldsVPN</title>
+<meta name="robots" content="noindex">
+<style>
+  :root { color-scheme: dark; }
+  html,body { margin:0; height:100%; }
+  body {
+    font: 16px/1.6 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+    background: linear-gradient(160deg,#1e1b4b,#0f172a);
+    color: #e2e8f0; display:flex; align-items:center; justify-content:center;
+    min-height:100vh; text-align:center; padding: 24px;
+  }
+  .card { max-width: 420px; }
+  .shield { width:72px; height:72px; margin:0 auto 18px; display:block; }
+  h1 { font-size: 28px; margin: 0 0 8px; letter-spacing:.01em; }
+  p { color:#a5b4fc; margin: 6px 0; }
+  .muted { color:#64748b; font-size:13px; margin-top:22px; }
+</style>
+</head>
+<body>
+  <main class="card">
+    <svg class="shield" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#0891b2"/>
+      </linearGradient></defs>
+      <path d="M12 2l8 3v6c0 5-3.5 8.5-8 11-4.5-2.5-8-6-8-11V5l8-3z" fill="url(#g)"/>
+      <path d="M8.5 12l2.5 2.5 4.5-5" stroke="#fff" stroke-width="1.8"
+            stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    </svg>
+    <h1>ShieldsVPN</h1>
+    <p>Secure access portal</p>
+    <p class="muted">This page is a placeholder. The service is hosted privately.</p>
+  </main>
+</body>
+</html>

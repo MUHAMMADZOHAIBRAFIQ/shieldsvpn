@@ -1,0 +1,10 @@
+# ShieldsVPN is an always-on VPN server + portal (persistent process, local database,
+# OpenSSL 3.5 post-quantum crypto, a held-open network port). It cannot run on Vercel's
+# serverless platform. These files are hidden from Vercel so it does not try to build them
+# as serverless functions; Vercel only serves the static placeholder in public/.
+# The real deployment target is a VPS / Linux server (see deploy/pqvpn-server.service).
+pqvpn/
+tests/
+pyproject.toml
+deploy/
+docs/
