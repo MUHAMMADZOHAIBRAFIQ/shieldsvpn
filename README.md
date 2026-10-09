@@ -1,6 +1,8 @@
-# pqvpn: a post-quantum, crypto-agile VPN
+# ShieldsVPN — a post-quantum, crypto-agile VPN
 
 A layer-3 VPN whose key exchange and authentication resist quantum computers. It uses only **NIST-standardised post-quantum cryptography**, combined the way modern protocols do (hybrid, crypto-agile), and invents no algorithms of its own.
+
+> **Name note:** the product is **ShieldsVPN**. The Python package and command-line tool are named `pqvpn` (the internal engine name), so commands below are run as `python -m pqvpn …` and data lives under `/var/lib/pqvpn`.
 
 | Layer | Algorithm | Standard |
 | --- | --- | --- |
