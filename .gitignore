@@ -1,0 +1,11 @@
+# private keys and generated PKI never belong in version control
+*.key
+vpn-pki*/
+__pycache__/
+*.pyc
+wintun.dll
+vpn-profiles/
+node_modules/
+# Firebase service-account keys (full admin access to the Firebase project)
+firebase-key*.json
+*-firebase-adminsdk-*.json

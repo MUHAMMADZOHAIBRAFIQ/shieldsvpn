@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pqvpn"
+version = "1.0.0"
+description = "Post-quantum, crypto-agile VPN: hybrid ML-KEM key exchange, ML-DSA/SLH-DSA authentication (OpenSSL >= 3.5)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+pqvpn = "pqvpn.cli:main"
+
+[tool.setuptools]
+packages = ["pqvpn", "pqvpn.crypto", "pqvpn.portal"]
+
+[tool.setuptools.package-data]
+# Nodemailer helper for portal email; run `npm ci --omit=dev` in pqvpn/portal/mailer after installing
+"pqvpn.portal" = ["mailer/send-mail.js", "mailer/package.json", "mailer/package-lock.json"]

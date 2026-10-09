@@ -1,0 +1,35 @@
+# /etc/systemd/system/pqvpn-server.service
+#   sudo cp -r server/ /etc/pqvpn && sudo cp -r pqvpn /opt/pqvpn/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now pqvpn-server
+[Unit]
+Description=pqvpn post-quantum VPN server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/etc/pqvpn
+Environment=PYTHONPATH=/opt/pqvpn
+# Only needed if the system OpenSSL is older than 3.5:
+#Environment=PQVPN_LIBCRYPTO=/opt/ossl35/lib/libcrypto.so.3
+ExecStart=/usr/bin/python3 -m pqvpn server -c /etc/pqvpn/server.toml
+Restart=on-failure
+RestartSec=3
+
+# Hardening: network admin only, read-only system, private /tmp, no core dumps
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_NETLINK AF_UNIX
+LockPersonality=yes
+LimitCORE=0
+DeviceAllow=/dev/net/tun rw
+ReadWritePaths=/run /proc/sys/net
+
+[Install]
+WantedBy=multi-user.target

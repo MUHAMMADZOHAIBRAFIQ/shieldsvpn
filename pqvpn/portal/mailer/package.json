@@ -1,0 +1,14 @@
+{
+  "name": "pqvpn-mailer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Delivers pqvpn portal emails (password-reset codes, notices) with Nodemailer",
+  "main": "send-mail.js",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "nodemailer": "^10.0.15"
+  }
+}
