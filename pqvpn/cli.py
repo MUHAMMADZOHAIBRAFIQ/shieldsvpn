@@ -293,6 +293,11 @@ def cmd_portal(args) -> int:
     return 0
 
 
+def cmd_app(args) -> int:
+    from .app import main
+    return main(args.config, autoconnect=args.connect)
+
+
 def cmd_tray(args) -> int:
     if sys.platform != "win32":
         raise SystemExit("the tray app is Windows-only; use `pqvpn client` elsewhere")
@@ -389,6 +394,11 @@ def main(argv=None) -> int:
     po = sub.add_parser("portal", help="run the web login / administration portal")
     po.add_argument("-c", "--config", required=True)
     po.set_defaults(fn=cmd_portal)
+
+    ap = sub.add_parser("app", help="ShieldsVPN desktop app: a simple 'Tap to Connect' window")
+    ap.add_argument("-c", "--config", required=True)
+    ap.add_argument("--connect", action="store_true", help="connect automatically on launch")
+    ap.set_defaults(fn=cmd_app)
 
     tr = sub.add_parser("tray", help="Windows taskbar app: shield icon, notifications, connect/disconnect")
     tr.add_argument("-c", "--config", required=True)
