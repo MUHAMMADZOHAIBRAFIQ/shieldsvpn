@@ -265,6 +265,34 @@ class ShieldsApp:
             self.root.destroy()
 
 
+def install_shortcut(config_path: str) -> list[str]:
+    """Create a 'ShieldsVPN' Desktop + Start-menu shortcut that opens this app (double-click to run)."""
+    import subprocess
+
+    from . import logo, winui
+    icon = logo.ensure_icons(os.path.join(winui.app_dir(), "icons"))["brand"]
+    target = winui.windowless_python()
+    args = f'-m pqvpn app -c "{os.path.abspath(config_path)}"'
+    created = []
+    for folder in ("Desktop", "Programs"):
+        ps = (f"$s=(New-Object -ComObject WScript.Shell);"
+              f"$d=[Environment]::GetFolderPath('{folder}');"
+              f"$l=$s.CreateShortcut((Join-Path $d 'ShieldsVPN.lnk'));"
+              f"$l.TargetPath='{target}';$l.Arguments='{args.replace(chr(39), chr(39) * 2)}';"
+              f"$l.WorkingDirectory='{winui.project_root()}';$l.IconLocation='{icon},0';"
+              f"$l.Description='ShieldsVPN — post-quantum VPN';$l.Save();(Join-Path $d 'ShieldsVPN.lnk')")
+        out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                             capture_output=True, text=True)
+        if out.returncode == 0:
+            path = out.stdout.strip()
+            try:
+                winui.set_shortcut_app_id(path, winui.APP_ID)
+            except OSError:
+                pass
+            created.append(path)
+    return created
+
+
 def main(config_path: str, autoconnect: bool = False) -> int:
     root = tk.Tk()
     try:
