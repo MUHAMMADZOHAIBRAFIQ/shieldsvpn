@@ -168,6 +168,17 @@ def reset_code_message(issuer: str, username: str, code: str, minutes: int, ip: 
                      "If this wasn't you, ignore this email &mdash; your password stays unchanged.")}
 
 
+def verify_code_message(issuer: str, code: str, minutes: int) -> dict:
+    e = html.escape
+    text = (f"Welcome to {issuer}!\n\nYour email verification code is:\n\n    {code}\n\n"
+            f"Enter it to finish creating your account. It expires in {minutes} minutes.\n"
+            "If you did not sign up, you can ignore this email.\n")
+    return {"subject": f"{code} is your {issuer} verification code", "text": text,
+            "html": _html(issuer, f"Welcome to {e(issuer)}", [
+                "Thanks for signing up! Use this code to verify your email and finish creating your account:"], code,
+                note=f"The code expires in {minutes} minutes. If you did not sign up, ignore this email.")}
+
+
 def password_changed_message(issuer: str, username: str, ip: str, when: str) -> dict:
     e = html.escape
     text = (f"Hello {username},\n\nThe password of your {issuer} account was changed with an emailed reset "

@@ -96,8 +96,10 @@ CREATE TABLE IF NOT EXISTS devices (
 """
 
 # Columns added after the first release: (name, definition) -- applied to older databases on open.
+# email_verified defaults to 1 so every admin-created account stays usable; self-service sign-ups set it to 0
+# until the emailed code is entered.
 USER_COLUMNS = [("email", "TEXT"), ("plan", "TEXT NOT NULL DEFAULT 'free'"), ("plan_expires", "INTEGER"),
-                ("custom_dns", "TEXT")]
+                ("custom_dns", "TEXT"), ("email_verified", "INTEGER NOT NULL DEFAULT 1")]
 INDEXES = """
 CREATE UNIQUE INDEX IF NOT EXISTS users_email ON users (email COLLATE NOCASE) WHERE email IS NOT NULL;
 CREATE INDEX IF NOT EXISTS password_resets_user ON password_resets (user_id, created_at);
@@ -170,7 +172,7 @@ class Store:
     def update_user(self, user_id: int, **fields) -> None:
         allowed = {"display_name", "role", "password_hash", "must_change_password", "totp_secret", "totp_enabled",
                    "totp_last_step", "enabled", "vpn_ip", "active_serial", "profile_issued_at", "failed_logins",
-                   "locked_until", "last_login_at", "email", "plan", "plan_expires", "custom_dns"}
+                   "locked_until", "last_login_at", "email", "plan", "plan_expires", "custom_dns", "email_verified"}
         if not fields or set(fields) - allowed:
             raise ValueError(f"bad fields {set(fields) - allowed}")
         cols = ", ".join(f"{k} = ?" for k in fields)

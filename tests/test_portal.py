@@ -564,6 +564,50 @@ class TestPortalEndToEnd(unittest.IsolatedAsyncioTestCase):
                                       "next": "https://evil.example/x"})
         self.assertEqual((st, h["Location"]), (303, "/"))
 
+    def test_public_signup_and_verify(self):
+        store = self.portal.store
+        store.set_settings({"portal_access": "everyone", "allow_signup": "0"})
+        self.assertEqual(Browser(self.port).get("/signup")[0], 404)  # hidden when off
+        store.set_settings({"allow_signup": "1"})
+        self.assertIn(b'href="/signup"', Browser(self.port).get("/login")[2])  # link appears when on
+
+        b, email, pw = Browser(self.port), "newbie@example.com", "a fresh signup passphrase"
+        st, _, body = b.post("/signup", {"email": email, "password": "short", "confirm": "short"})
+        self.assertEqual(st, 400)
+        self.assertIn(b"at least", body)
+        st, _, body = b.post("/signup", {"email": email, "password": pw, "confirm": "mismatch here now"})
+        self.assertIn(b"do not match", body)
+        st, h, _ = b.post("/signup", {"email": email, "password": pw, "confirm": pw})
+        self.assertEqual((st, h["Location"]), (303, "/signup/verify?email=newbie%40example.com"))
+        u = store.user_by_email(email)
+        self.assertEqual((u["role"], u["plan"], u["email_verified"]), ("user", "free", 0))
+
+        code = self._code(self.mails.wait(email, 1)[0])
+        st, _, body = Browser(self.port).login(email, pw)  # cannot sign in before verifying
+        self.assertEqual(st, 403)
+        self.assertIn(b"verify your email", body)
+        wrong = "000000" if code != "000000" else "111111"
+        self.assertEqual(b.post("/signup/verify", {"email": email, "code": wrong})[0], 400)
+        st, h, _ = b.post("/signup/verify", {"email": email, "code": code})
+        self.assertEqual((st, h["Location"]), (303, "/"))  # verified -> signed in
+        self.assertEqual(store.user_by_email(email)["email_verified"], 1)
+        _, _, dash = b.get("/")
+        self.assertIn(b"Welcome", dash)
+        self.assertIn(b"/upgrade", dash)
+        self.assertIn(b"Upgrade to Premium", b.get("/upgrade")[2])
+
+        st, h, _ = Browser(self.port).login(email, pw)  # normal sign-in works now
+        self.assertEqual((st, h["Location"]), (303, "/"))
+
+        before = len(self.mails.wait(email, 0))
+        st, h, _ = Browser(self.port).post("/signup", {"email": email, "password": "yet another passphrase",
+                                                       "confirm": "yet another passphrase"})
+        self.assertEqual((st, h["Location"]), (303, "/signup/verify?email=newbie%40example.com"))  # identical
+        time.sleep(0.4)
+        self.assertEqual(len(self.mails.wait(email, 0)), before)  # no email to an existing verified account
+        self.assertEqual(len([x for x in store.users() if x["email"] == email]), 1)  # no duplicate account
+        store.set_settings({"allow_signup": "0"})
+
     def test_host_header_rejected(self):
         # A DNS-rebinding page sets a foreign Host; the portal must refuse before doing anything.
         st, _, body = Browser(self.port).req("GET", "/login", headers={"Host": "rebind.attacker.example"})

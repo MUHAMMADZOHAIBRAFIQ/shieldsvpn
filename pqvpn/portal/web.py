@@ -59,7 +59,9 @@ DEVICE_TTL = 60 * 24 * 3600  # a browser stays a "known device" (for lockout sco
 SECRET_SETTINGS = ("smtp_password",)
 REDACTED_ACTOR = "(unknown)"  # never store a typed login verbatim: it is sometimes a mistyped password
 # "admins": only administrators may sign in; "everyone": users also sign in to download their own profile.
-PORTAL_DEFAULTS = {"portal_access": "admins"}
+# allow_signup "1" turns on the public "Create account" (Free) + email verification + Premium upgrade flow.
+PORTAL_DEFAULTS = {"portal_access": "admins", "allow_signup": "0"}
+SIGNUP_TTL, SIGNUP_MAX_ATTEMPTS = 10 * 60, 5
 
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; "
        "form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
@@ -166,6 +168,9 @@ class Portal:
 
     def admins_only(self) -> bool:
         return self.settings()["portal_access"] != "everyone"
+
+    def signup_enabled(self) -> bool:
+        return self.settings().get("allow_signup") == "1"
 
     def may_sign_in(self, user: dict) -> bool:
         return user["role"] == "admin" or not self.admins_only()
@@ -520,6 +525,7 @@ def page_login(h: Handler, error: str = "", status: int = 200) -> None:
         msg = '<p class="alert ok">Your password was changed. Sign in with your new password.</p>'
     who = (f"{e(h.portal.cfg.issuer)} administration. Administrators only." if h.portal.admins_only() else
            f"Access to {e(h.portal.cfg.issuer)} is restricted to authorised users.")
+    signup = ' &middot; <a href="/signup">Create an account</a>' if h.portal.signup_enabled() else ""
     h._html("Sign in", f"""<section class="card narrow login">
 <div class="hero">{logo.svg("brand", 72, "login")}</div>
 <h1>Sign in</h1><p class="muted">{who}</p>{msg}
@@ -527,7 +533,7 @@ def page_login(h: Handler, error: str = "", status: int = 200) -> None:
 <label>Username or email<input name="username" autocomplete="username" required maxlength="254" autofocus></label>
 <label>Password<input name="password" type="password" autocomplete="current-password" required maxlength="128"></label>
 <button class="btn primary wide">Sign in</button></form>
-<p class="links"><a href="/forgot">Forgot password?</a></p></section>""", status)
+<p class="links"><a href="/forgot">Forgot password?</a>{signup}</p></section>""", status)
 
 
 def _register_failure(h: Handler, user: dict, device: dict | None, now: int) -> None:
@@ -569,6 +575,10 @@ def do_login(h: Handler) -> None:
     if not user["enabled"]:
         h._audit("login_disabled", actor=user["username"])
         return page_login(h, generic, 401)
+    if not user["email_verified"]:  # a self-service sign-up that never entered its code
+        h._audit("login_unverified", actor=user["username"])
+        return page_login(h, "Please verify your email first. Check your inbox for the code, or use "
+                          "Create an account again to get a new one.", 403)
     if not h.portal.may_sign_in(user):
         h._audit("login_denied", "portal is restricted to administrators", actor=user["username"])
         return page_login(h, "This portal is restricted to administrators.", 403)
@@ -756,6 +766,151 @@ def do_forgot_verify(h: Handler) -> None:
     h._redirect("/login?reset=done", [h._cookie("", max_age=0)] if h.token else [])
 
 
+# -------------------------------------------------------------------- public sign-up (email + verification)
+
+def _signup_username(store: Store, email: str) -> str:
+    """A unique, valid username derived from the email's local part (it becomes the VPN certificate subject)."""
+    base = re.sub(r"[^A-Za-z0-9._-]", "", email.split("@")[0]).strip("._-")[:24] or "user"
+    if not base[0].isalnum():
+        base = "u" + base
+    base = base[:28] if len(base) >= 2 else "user"
+    name = base
+    while store.user_by_name(name):
+        name = f"{base}-{secrets.token_hex(2)}"[:32]
+    return name
+
+
+def page_signup(h: Handler, error: str = "", status: int = 200) -> None:
+    if not h.portal.signup_enabled():
+        return h._error(404, "Page not found.")
+    if h.session and not h.session["pending_2fa"]:
+        return h._redirect("/")
+    msg = f'<p class="alert">{e(error)}</p>' if error else ""
+    if not mail.is_configured(h.portal.settings()):
+        body = ('<p class="alert info">Sign-up by email is not available yet. Please check back later.</p>'
+                '<p class="links"><a href="/login">Back to sign in</a></p>')
+    else:
+        body = f"""<form method="post" action="/signup" autocomplete="on">
+<label>Email<input name="email" type="email" autocomplete="email" required maxlength="254" autofocus
+value="{e(h.form.get('email', '')[:254])}"></label>
+<label>Password<input name="password" type="password" autocomplete="new-password" required
+minlength="{auth.MIN_PASSWORD}" maxlength="{auth.MAX_PASSWORD}"></label>
+<label>Repeat password<input name="confirm" type="password" autocomplete="new-password" required></label>
+<p class="muted small">At least {auth.MIN_PASSWORD} characters. We'll email you a code to verify your address.</p>
+<button class="btn primary wide">Create account</button></form>
+<p class="links">Already have an account? <a href="/login">Sign in</a></p>"""
+    h._html("Create account", f"""<section class="card narrow login">
+<div class="hero">{logo.svg("brand", 72, "signup")}</div><h1>Create your account</h1>
+<p class="muted">Sign up free &mdash; then upgrade to Premium whenever you like.</p>{msg}{body}</section>""", status)
+
+
+def do_signup(h: Handler) -> None:
+    portal, store = h.portal, h.portal.store
+    if not portal.signup_enabled():
+        return h._error(404, "Page not found.")
+    if not portal.allow_attempt(h.ip):
+        h._audit("signup_rate_limited", actor=REDACTED_ACTOR)
+        return page_signup(h, "Too many attempts from your network. Wait a minute and try again.", 429)
+    email = h.form.get("email", "").strip().lower()[:254]
+    password = h.form.get("password", "")[:auth.MAX_PASSWORD]
+    if not mail.valid_email(email):
+        return page_signup(h, "Enter a valid email address.", 400)
+    if password != h.form.get("confirm", ""):
+        return page_signup(h, "The passwords do not match.", 400)
+    problems = auth.password_problems(password)
+    if problems:
+        return page_signup(h, "Password " + "; ".join(problems) + ".", 400)
+    if not mail.is_configured(portal.settings()):
+        return page_signup(h, "Sign-up by email is not available right now.", 503)
+    existing = store.user_by_email(email)
+    code = f"{secrets.randbelow(10 ** 6):06d}"
+    code_hash = auth.hash_password(code)  # the code is stored only hashed, like a password
+    msg = mail.verify_code_message(portal.cfg.issuer, code, SIGNUP_TTL // 60)
+    if existing is None:
+        username = _signup_username(store, email)
+        uid = store.create_user(username, "user", password, must_change=False)
+        store.update_user(uid, email=email, plan="free", email_verified=0)
+        store.create_reset(uid, code_hash, SIGNUP_TTL, h.ip)
+        h._audit("signup_started", f"email={mask_email(email)}", actor=username)
+        portal.send_email_async(email, msg, "sign-up verification", username, h.ip)
+    elif not existing["email_verified"]:  # re-signup of a not-yet-verified address: resend, adopt the new password
+        store.update_user(existing["id"], password_hash=auth.hash_password(password))
+        store.create_reset(existing["id"], code_hash, SIGNUP_TTL, h.ip)
+        h._audit("signup_resend", actor=existing["username"])
+        portal.send_email_async(email, msg, "sign-up verification", existing["username"], h.ip)
+    else:  # a verified account already exists: identical response, no email (no enumeration, no takeover)
+        h._audit("signup_existing", f"email={mask_email(email)}")
+    h._redirect("/signup/verify?" + urllib.parse.urlencode({"email": email}))
+
+
+def page_signup_verify(h: Handler, error: str = "", status: int = 200, code: str = "") -> None:
+    if not h.portal.signup_enabled():
+        return h._error(404, "Page not found.")
+    email = (h.form.get("email") or h.query.get("email", "")).strip().lower()[:254]
+    if not email:
+        return h._redirect("/signup")
+    msg = (f'<p class="alert">{e(error)}</p>' if error else
+           '<p class="alert info">If that address can be registered, a 6-digit code is on its way (check spam '
+           f'too). It expires after {SIGNUP_TTL // 60} minutes.</p>')
+    h._html("Verify your email", f"""<section class="card narrow login">
+<div class="hero">{logo.svg("brand", 72, "verify")}</div><h1>Verify your email</h1>
+<p class="muted">Enter the code we sent to <strong>{e(email)}</strong>.</p>{msg}
+<form method="post" action="/signup/verify" autocomplete="off"><input type="hidden" name="email" value="{e(email)}">
+<label>Verification code<input name="code" inputmode="numeric" pattern="[0-9 ]{{6,7}}" autocomplete="one-time-code"
+required maxlength="7" autofocus value="{e(code)}"></label>
+<button class="btn primary wide">Verify &amp; sign in</button></form>
+<p class="links"><a href="/signup?{e(urllib.parse.urlencode({'email': email}))}">Send a new code</a>
+&middot; <a href="/login">Back to sign in</a></p></section>""", status)
+
+
+def do_signup_verify(h: Handler) -> None:
+    portal, store = h.portal, h.portal.store
+    if not portal.signup_enabled():
+        return h._error(404, "Page not found.")
+    if not portal.allow_attempt(h.ip):
+        return page_signup_verify(h, "Too many attempts from your network. Wait a minute and try again.", 429)
+    email = h.form.get("email", "").strip().lower()[:254]
+    code = auth.digits_only(h.form.get("code", ""))
+    user = store.user_by_email(email) if mail.valid_email(email) else None
+    reset = store.active_reset(user["id"]) if user and not user["email_verified"] else None
+    valid = auth.verify_password(code, reset["code_hash"] if reset else None) and len(code) == 6
+    invalid = "That code is not valid or has expired. Use the code from the latest email, or send a new one."
+    if not valid:
+        if reset:
+            store.reset_failed(reset["id"], SIGNUP_MAX_ATTEMPTS)
+            h._audit("signup_code_failed", f"attempt {reset['attempts'] + 1} of {SIGNUP_MAX_ATTEMPTS}",
+                     actor=user["username"])
+        return page_signup_verify(h, invalid, 400)
+    if not store.consume_reset(reset["id"]):  # single use; lost a race
+        return page_signup_verify(h, invalid, 400)
+    store.update_user(user["id"], email_verified=1, enabled=1)
+    h._audit("signup_verified", f"email={mask_email(email)}", actor=user["username"])
+    user = store.user(user["id"])
+    _complete_login(h, user)  # creates the session and lands them on their dashboard
+
+
+def page_upgrade(h: Handler) -> None:
+    u = h.user
+    plan = plans.effective_plan(u)
+    if plan == "premium":
+        until = f" until {e(last_day(u['plan_expires']))}" if u["plan_expires"] else ""
+        body = (f'<p class="alert ok">You are on <strong>Premium</strong>{until}. Thank you! \U0001F389</p>'
+                '<p>Enjoy ad-, tracker- and malware-blocking DNS and priority support.</p>')
+    else:
+        body = """<ul class="muted" style="line-height:1.9">
+<li>\U0001F6E1️ Ad-, tracker- and malware-blocking DNS</li>
+<li>⚡ Priority connections</li>
+<li>\U0001F30D More locations as they launch</li></ul>
+<p><button class="btn primary wide" disabled>Upgrade to Premium</button></p>
+<p class="alert info small">Card payments are being set up. Until then, ask your administrator to switch your
+account to Premium.</p>"""
+    h._html("Upgrade to Premium", f"""<h1 class="page">Upgrade to Premium</h1><div class="cols">
+<section class="card"><h2>Premium</h2>{body}</section>
+<section class="card"><h2>Your plan</h2><p>{_plan_badge(u)}</p>
+<p class="muted small">Signed in as {e(u['email'] or u['username'])}.</p>
+<p><a href="/">&larr; Back to dashboard</a></p></section></div>""")
+
+
 def do_logout(h: Handler) -> None:
     h.portal.store.delete_session(h.token)
     h._audit("logout")
@@ -810,7 +965,8 @@ def _plan_card(h: Handler, u: dict) -> str:
     until = (f" until {e(last_day(u['plan_expires']))}" if plan == "premium" and u["plan_expires"] else "")
     expired = ('<p class="muted small">Your Premium plan ended on '
                f'{e(last_day(u["plan_expires"]))}.</p>' if u["plan"] == "premium" and plan == "free" else "")
-    upsell = ('<p class="muted small">Premium adds ad-, tracker- and malware-blocking DNS. Ask your administrator.</p>'
+    upsell = ('<p class="muted small">Premium adds ad-, tracker- and malware-blocking DNS, and more.</p>'
+              '<p><a class="btn small primary" href="/upgrade">Upgrade to Premium</a></p>'
               if plan == "free" else "")
     return f"""<section class="card"><h2>Your plan</h2><p>{_plan_badge(u)}{until}</p>{expired}
 <p>DNS through the VPN: <strong>{_dns_label(u, h.portal.settings())}</strong></p>{upsell}
@@ -1325,9 +1481,15 @@ def page_admin_settings(h: Handler, notice: str = "", error: str = "") -> None:
              "VPN profile.")))
     admins = [u for u in h.portal.store.users() if u["role"] == "admin"]
     admin_list = ", ".join(e(u["username"] + (f" ({u['email']})" if u["email"] else "")) for u in admins)
+    signup_on = " checked" if settings.get("allow_signup") == "1" else ""
+    signup_box = (f'<hr><label class="choice"><input type="checkbox" name="allow_signup"{signup_on}>'
+                  '<span><strong>Allow public sign-up</strong><br><span class="muted small">People can create '
+                  'their own <strong>Free</strong> account (email + password, verified by an emailed code) and '
+                  'later upgrade to Premium. Needs <em>All users</em> access above and email set up.</span></span>'
+                  '</label>')
     h._html("Settings", f"""<h1 class="page">Settings</h1>{_notices(notice, error)}
 <section class="card" id="access"><h2>Portal access</h2>
-<form method="post" action="/admin/settings/access">{_csrf_field(h)}{access_opts}
+<form method="post" action="/admin/settings/access">{_csrf_field(h)}{access_opts}{signup_box}
 <button class="btn primary">Save access</button></form>
 <p class="muted small">Administrators now: {admin_list}. To give someone access, open their page under
 <a href="/admin">Users</a> and set the role to Administrator.</p></section><div class="cols">
@@ -1455,10 +1617,16 @@ def do_admin_settings_access(h: Handler) -> None:
     access = h.form.get("portal_access", "")
     if access not in ("admins", "everyone"):
         return page_admin_settings(h, error="Choose who can sign in.")
-    h.portal.store.set_settings({"portal_access": access})
-    h._audit("portal_access_changed", "administrators only" if access == "admins" else "all users")
-    page_admin_settings(h, notice="Only administrators can sign in now; other users' sessions were ended."
-                        if access == "admins" else "All users can sign in now.")
+    allow_signup = "1" if h.form.get("allow_signup") else "0"
+    h.portal.store.set_settings({"portal_access": access, "allow_signup": allow_signup})
+    h._audit("portal_access_changed", f"{'administrators only' if access == 'admins' else 'all users'}; "
+             f"public sign-up {'on' if allow_signup == '1' else 'off'}")
+    note = ("Only administrators can sign in now; other users' sessions were ended." if access == "admins"
+            else "All users can sign in now.")
+    if allow_signup == "1" and access == "admins":
+        note += " ⚠ Public sign-up is on, but 'Administrators only' blocks those users from signing in — " \
+                "switch to 'All users' for sign-up to work."
+    page_admin_settings(h, notice=note)
 
 
 def do_admin_settings_dns(h: Handler) -> None:
@@ -1568,6 +1736,11 @@ ROUTES = [
     ("POST", r"/forgot", "public", do_forgot),
     ("GET", r"/forgot/verify", "public", lambda h: page_forgot_verify(h)),
     ("POST", r"/forgot/verify", "public", do_forgot_verify),
+    ("GET", r"/signup", "public", lambda h: page_signup(h)),
+    ("POST", r"/signup", "public", do_signup),
+    ("GET", r"/signup/verify", "public", lambda h: page_signup_verify(h)),
+    ("POST", r"/signup/verify", "public", do_signup_verify),
+    ("GET", r"/upgrade", "user", page_upgrade),
     ("POST", r"/profile", "user", lambda h: do_profile(h)),
     ("GET", r"/api/status", "user", api_status),
     ("GET", r"/account", "user", lambda h: page_account(h)),
