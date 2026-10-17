@@ -4,7 +4,7 @@ Status: research note, 2026-10-17. The experiment is reproducible
 ([traffic_analysis/experiment.py](traffic_analysis/experiment.py)) and its raw results are in
 [results/traffic_analysis.json](results/traffic_analysis.json). Everything here concerns the **VPN client and
 protocol**. The investigation, OSINT and attribution topics in the research guide are out of scope: this
-repository does not implement them and must not. See [Boundaries](#boundaries).
+repository does not implement them and must not. See [Boundaries](#5-boundaries).
 
 ## 1. Threat model
 

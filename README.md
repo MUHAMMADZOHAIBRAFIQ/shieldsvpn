@@ -89,6 +89,7 @@ Set `full_tunnel = true` in `client.toml` to send all traffic through the VPN.
 ## Login portal and Windows app
 
 `pqvpn portal-init` sets up a complete deployment in one step:
+
 - the root CA and the server identity
 - `server.toml` and `portal.toml`
 - the first administrator account
@@ -100,6 +101,7 @@ sudo python3 -m pqvpn portal -c /var/lib/pqvpn/portal.toml     # http://127.0.0.
 ```
 
 **Portal (standard practices only):**
+
 - scrypt password hashing (RFC 7914, OWASP parameters) with NIST SP 800-63B password rules
 - TOTP two-factor authentication (RFC 6238) with QR enrolment for any authenticator app
 - hashed session tokens with HttpOnly/SameSite cookies, CSRF tokens and Origin checks
@@ -111,6 +113,7 @@ sudo python3 -m pqvpn portal -c /var/lib/pqvpn/portal.toml     # http://127.0.0.
 **What users can do (only with *All users*):** sign in with their username or email address, see their live VPN status and plan, and download their profile. Every download creates a fresh ML-DSA key; the previous profile stops working and private keys are never stored. They can set a recovery email and use **Forgot password?** on the sign-in page to reset their password with a 6-digit code sent by email.
 
 **What admins can do:** after signing in, admins land on the **admin dashboard**. It shows:
+
 - live server status and a connected-now count
 - totals for users and Premium
 - whether email and portal access are set up
@@ -118,6 +121,7 @@ sudo python3 -m pqvpn portal -c /var/lib/pqvpn/portal.toml     # http://127.0.0.
 - a searchable user table where every row has Edit, Disable/Enable, Unlock, Reset password, New profile and Delete
 
 From there admins can:
+
 - create, edit (name, email, role), disable, unlock or delete users; reset passwords or 2FA; end a user's portal sessions; issue profiles
 - put users on the **Free** or **Premium** plan, optionally with an end date (after it they drop back to Free automatically)
 - choose the **DNS servers each plan gets** in *Settings*. Presets cover Cloudflare, Cloudflare Security/Family, Quad9, AdGuard (ads + trackers + malware), AdGuard Family and Google, or enter custom servers. A single user can also get a DNS override. Premium defaults to AdGuard.
@@ -131,12 +135,14 @@ The VPN server pushes the DNS servers in the handshake, so plan and DNS changes 
 Without TLS, the portal only listens on loopback and on the VPN tunnel address. To expose it anywhere else, configure `tls_certificate`/`tls_private_key`.
 
 **Firebase (Firestore) mirror:** the portal can keep a live, read-only copy of its data in your Firebase project. It covers users, live connections, server status, plans/DNS/access settings and the audit log.
+
 - **The VPN doesn't depend on Firebase.** It keeps checking its fast local SQLite database, so it works when the internet or Firebase is down.
 - **Secrets stay local.** Only allow-listed fields are uploaded. Password hashes, 2FA secrets, sessions, reset codes and the email app password are never sent.
 - **Fits the free tier.** Documents are written only when they change, and live traffic counters refresh at most every 5 minutes. That stays well inside Firestore's free 20,000 writes per day.
 - **No extra Python packages.** It signs in with a standard service-account token (RS256 via OpenSSL) and uses Firestore's REST API.
 
 Setup:
+
 1. At <https://console.firebase.google.com>, create a project.
 2. Open **Firestore Database → Create database** and choose **production mode**, so the data isn't public. The portal writes as an admin service account, which isn't affected by the security rules.
 3. Go to **⚙ Project settings → Service accounts → Generate new private key**.
@@ -162,6 +168,7 @@ python -m pqvpn tray -c client.toml                      # or double-click the s
 ```
 
 **What the taskbar app shows:**
+
 - **A shield icon** in the notification area: grey = disconnected, amber = connecting/reconnecting, green = connected, red = error.
 - **Windows notifications** titled "PQ VPN".
 - **A right-click menu:** Connect, Disconnect, Open portal, Open log, Exit.

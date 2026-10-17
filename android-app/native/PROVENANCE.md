@@ -8,7 +8,7 @@ binary is used. This file records exactly what went in, so anyone can rebuild th
 
 | Input | Identity | How it was verified (2026-10-17) |
 | --- | --- | --- |
-| OpenSSL source | `openssl-3.5.9.tar.gz`, SHA-256 `603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a` | 1. The SHA-256 equals the `openssl-3.5.9.tar.gz.sha256` published on the GitHub release `openssl/openssl` `openssl-3.5.9`. 2. `gpg --verify openssl-3.5.9.tar.gz.asc` (fresh keyring): **Good signature from "OpenSSL &lt;openssl@openssl.org&gt;"**. The signing subkey is `C46E D3F2 CBEF DA1F DAAD A442 64ED 7B1D CCE7 1CB2`. Its primary key, `B146 647E 45A7 B339 47AB 226B 2A2C 87D1 6169 2D40`, is the key that <https://openssl-library.org/source/> lists as the current signing key. The key was fetched from keys.openpgp.org. |
+| OpenSSL source | `openssl-3.5.9.tar.gz`, SHA-256 `603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a` | 1. The SHA-256 equals the `openssl-3.5.9.tar.gz.sha256` published on the GitHub release `openssl/openssl` `openssl-3.5.9`. 2. `gpg --verify openssl-3.5.9.tar.gz.asc` (fresh keyring): **Good signature from `OpenSSL <openssl@openssl.org>`**. The signing subkey is `C46E D3F2 CBEF DA1F DAAD A442 64ED 7B1D CCE7 1CB2`. Its primary key, `B146 647E 45A7 B339 47AB 226B 2A2C 87D1 6169 2D40`, is the key that <https://openssl-library.org/source/> lists as the current signing key. The key was fetched from keys.openpgp.org. |
 | Android NDK | r28c, `Pkg.Revision = 28.2.13676358`, `android-ndk-r28c-linux.zip` SHA-1 `a7b54a5de87fecd125a17d54f73c446199e72a64` | The SHA-1 equals the value listed for r28c on <https://github.com/android/ndk/wiki/Unsupported-Downloads>. |
 | Build host | Ubuntu on WSL 2, x86_64 | — |
 

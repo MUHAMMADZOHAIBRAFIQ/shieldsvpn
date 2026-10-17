@@ -37,63 +37,63 @@
 
 ## Android client
 
-- **No new trust:** the app embeds the same pqvpn code and verifies the server certificate, server name, signatures and Finished MACs exactly like the desktop client. Nothing in the APK is a secret: no CA key, server key, PSK or enrollment token.
-- **Profiles:** the user imports the portal's profile ZIP. Python validates it in memory, without extracting by path. The certificate must chain to the bundled CA, be a client certificate that is valid now, and match the private key. The private key and PSK are stored only as AES-256-GCM ciphertext under a non-exportable Android Keystore key. The files sit in app-private, no-backup storage, and backups and device transfer are disabled.
-- **Interface only after authentication:** the TUN interface is created after the handshake, from the server's authenticated configuration push. The pushed tunnel address must be an address in the CA-signed client certificate, or the configuration is refused. Nothing is captured before Android's VPN consent and a completed handshake.
-- **Leaks:** the app's own UDP flow is excluded from the VPN and protected. In full-tunnel mode, an address family with no tunnel address (normally IPv6) is blocked by Android rather than sent outside the tunnel. During reconnects the interface stays up, so traffic is held, not leaked.
-- **DNS (fixed in this revision):** if a VPN has no DNS servers, Android resolves through the *underlying* network's DNS. This was verified on API 36, and it meant that a full-tunnel connection without server-pushed DNS sent every lookup outside the tunnel. The client now **refuses to connect** in that case (`TunnelConfigError`), with a message telling the operator to set `[tunnel] dns` or a plan DNS. In split-tunnel mode, DNS follows the pushed servers when they exist. Otherwise the device's normal resolver is used, which is the intended split-tunnel behaviour.
-- **Kill switch:** the app does not claim to provide one itself. It supports Android's **always-on VPN** (`SUPPORTS_ALWAYS_ON = true`, start via the `SERVICE_INTERFACE` action) and shows whether Android reports always-on and **"Block connections without VPN"** (lockdown) as on, off or unknown. Only lockdown, which is enforced by Android, blocks traffic while the tunnel is down. With lockdown enabled on the API 36 emulator, DNS, TCP and ICMP were blocked after a disconnect and during a process kill, and always-on reconnected automatically.
-- **Profile binding:** sealed secrets carry the certificate serial they belong to. A secrets file that does not match the installed profile is refused, and a crash between writing the two files is recovered only when the serials match.
-- **Limits:** the decrypted key briefly exists in JVM and Python memory, which cannot be zeroised. A rooted or compromised phone can read the key while the VPN runs.
+* **No new trust:** the app embeds the same pqvpn code and verifies the server certificate, server name, signatures and Finished MACs exactly like the desktop client. Nothing in the APK is a secret: no CA key, server key, PSK or enrollment token.
+* **Profiles:** the user imports the portal's profile ZIP. Python validates it in memory, without extracting by path. The certificate must chain to the bundled CA, be a client certificate that is valid now, and match the private key. The private key and PSK are stored only as AES-256-GCM ciphertext under a non-exportable Android Keystore key. The files sit in app-private, no-backup storage, and backups and device transfer are disabled.
+* **Interface only after authentication:** the TUN interface is created after the handshake, from the server's authenticated configuration push. The pushed tunnel address must be an address in the CA-signed client certificate, or the configuration is refused. Nothing is captured before Android's VPN consent and a completed handshake.
+* **Leaks:** the app's own UDP flow is excluded from the VPN and protected. In full-tunnel mode, an address family with no tunnel address (normally IPv6) is blocked by Android rather than sent outside the tunnel. During reconnects the interface stays up, so traffic is held, not leaked.
+* **DNS (fixed in this revision):** if a VPN has no DNS servers, Android resolves through the *underlying* network's DNS. This was verified on API 36, and it meant that a full-tunnel connection without server-pushed DNS sent every lookup outside the tunnel. The client now **refuses to connect** in that case (`TunnelConfigError`), with a message telling the operator to set `[tunnel] dns` or a plan DNS. In split-tunnel mode, DNS follows the pushed servers when they exist. Otherwise the device's normal resolver is used, which is the intended split-tunnel behaviour.
+* **Kill switch:** the app does not claim to provide one itself. It supports Android's **always-on VPN** (`SUPPORTS_ALWAYS_ON = true`, start via the `SERVICE_INTERFACE` action) and shows whether Android reports always-on and **"Block connections without VPN"** (lockdown) as on, off or unknown. Only lockdown, which is enforced by Android, blocks traffic while the tunnel is down. With lockdown enabled on the API 36 emulator, DNS, TCP and ICMP were blocked after a disconnect and during a process kill, and always-on reconnected automatically.
+* **Profile binding:** sealed secrets carry the certificate serial they belong to. A secrets file that does not match the installed profile is refused, and a crash between writing the two files is recovered only when the serials match.
+* **Limits:** the decrypted key briefly exists in JVM and Python memory, which cannot be zeroised. A rooted or compromised phone can read the key while the VPN runs.
 
 ## Portal security model
 
-- **The portal host is security-critical.** It holds the CA private key so that it can issue profiles. Run it on the VPN server or another hardened host; the data directory is `0700` and the keys and database are `0600`.
-- **Only administrators can sign in by default** (Settings → Portal access). The check runs at sign-in *and* on every request, so if an account is demoted or the setting changes, its open sessions stop working at once. Other accounts are VPN-only: their portal password is never shown or used, and password-reset codes are not sent to them.
-- **Accounts are authenticated with standard mechanisms:**
-  - passwords hashed with scrypt (N=2^17, r=8, p=1), with the NIST SP 800-63B policy
-  - TOTP 2FA (RFC 6238) with replay protection; **required for administrators by default** (`require_2fa_for_admins`), enforced on every request until the admin has enrolled
-  - lockout after 5 failures for 15 minutes, plus per-IP rate limiting. Lockout is **scoped by device** (OWASP device cookies): failures from a browser that has signed in before count only against that browser, and failures from unknown clients lock only the "unknown client" bucket — so an attacker who knows a username cannot lock the owner out of the browser they actually use. Re-authentication on the account pages (password change, email change, disabling 2FA) is rate-limited too.
-  - generic error messages and a constant-time dummy hash, so attackers cannot discover which usernames exist
-  - a typed login is never written to the audit log verbatim (it is sometimes a mistyped password); unknown-account events record `(unknown)`
-- **Sessions:**
-  - 256-bit random tokens, stored only as SHA-256 hashes
-  - 30-minute idle and 12-hour absolute timeouts
-  - rotated at login; revoked at logout, at password change and when an admin disables the account
-- **Web hardening:**
-  - CSRF synchronizer tokens and an Origin check on every POST (the token compare is done on bytes, so a crafted non-ASCII token is rejected cleanly instead of erroring)
-  - a **Host-header allow-list** on every request, so a DNS-rebinding page on another origin cannot drive the portal; add extra names with `allowed_hosts` in `portal.toml` (loopback, the listen addresses and the configured URLs are allowed automatically)
-  - a CSP that allows no inline script, plus frame-ancestors none, nosniff and no-store
-  - `Referrer-Policy: same-origin`. With `no-referrer`, browsers send `Origin: null` on form POSTs (Fetch standard), which the Origin check would reject.
-  - all output is HTML-escaped
-- **Password recovery by email** follows the OWASP Forgot Password guidance:
-  - A random 6-digit code is emailed to the address on the account. The code is stored only as an scrypt hash, expires after 10 minutes, works once, and allows 5 wrong guesses. A newer code replaces the older one.
-  - Requests are throttled per IP and per account (one code per minute, five per hour), so the form cannot be used to flood someone's mailbox.
-  - The response and its timing are the same whether or not the account exists. Email is sent in the background and the code is hashed even for unknown accounts.
-  - A successful reset clears any lockout and signs out every session. The account owner then gets a "password was changed" email. 2FA still applies at the next sign-in.
-  - Every step is in the audit log (`password_reset_requested`, `password_reset_not_sent`, `password_reset_code_failed`, `password_reset_by_email`, `email_sent`/`email_failed`).
-  - **Recovery is only as strong as the mailbox.** Anyone who controls a user's email can reset their password. Users should protect their mailbox with 2FA. Admins should consider portal 2FA, which an email reset does not bypass.
-- **Outgoing email** goes through Nodemailer with TLS: implicit TLS on 465, or STARTTLS on 587 where TLS is required, and the certificate is always verified. Before sending, the SMTP host is resolved once and refused if it is a loopback/private/reserved address, and the connection is pinned to that resolved IP (TLS still verified against the host name) — so the email settings cannot be turned into an SSRF probe of the internal network, and there is no rebind window between the check and the send. A local relay is allowed with `allow_internal_smtp = true` in `portal.toml`.
-  - The SMTP App Password cannot be hashed (the portal must present it to the mail server), so it is **encrypted at rest** with AES-256-GCM. The key is a 32-byte file, `portal-secrets.key`, kept `0600` next to the database; stored values look like `enc:v1:…`. A copied or backed-up `portal.db` therefore does not reveal the password. **Back up `portal-secrets.key` separately** (lose it and you simply re-enter the App Password); keep it out of the same backup as the database. A plaintext value from an older database is re-encrypted automatically at start-up. The password reaches the Node process on stdin, never argv or the environment, and is never shown again in the UI.
-- **Firebase mirror (optional):**
-  - It is one-way: the portal writes to Firestore and never reads authorization data back. The VPN's access decisions stay local, so a compromised or unreachable Firebase project cannot let anyone into the VPN or lock them out.
-  - Only allow-listed fields are uploaded (see `firebase.py`). Password hashes, TOTP secrets, sessions, reset codes and the SMTP password are never sent, and a test enforces this.
-  - The mirrored data still includes names, emails, IP addresses and the audit log. Create the Firestore database in **production mode** so client access is denied, and don't relax the security rules.
-  - The service-account key grants admin rights over the Firebase project. It is stored next to the database with mode 0600 and never shown again in the UI. The signed RS256 assertion is always sent to Google's fixed token endpoint (`oauth2.googleapis.com`) over verified TLS: the `token_uri` inside a pasted key is validated but **never used as a request URL**, and the `project_id` is validated, so a tampered key cannot redirect the request (or the assertion) to an attacker's server. Malformed responses from Google are reported as errors rather than crashing the mirror.
-- **Two independent checks before VPN access:**
+* **The portal host is security-critical.** It holds the CA private key so that it can issue profiles. Run it on the VPN server or another hardened host; the data directory is `0700` and the keys and database are `0600`.
+* **Only administrators can sign in by default** (Settings → Portal access). The check runs at sign-in *and* on every request, so if an account is demoted or the setting changes, its open sessions stop working at once. Other accounts are VPN-only: their portal password is never shown or used, and password-reset codes are not sent to them.
+* **Accounts are authenticated with standard mechanisms:**
+  * passwords hashed with scrypt (N=2^17, r=8, p=1), with the NIST SP 800-63B policy
+  * TOTP 2FA (RFC 6238) with replay protection; **required for administrators by default** (`require_2fa_for_admins`), enforced on every request until the admin has enrolled
+  * lockout after 5 failures for 15 minutes, plus per-IP rate limiting. Lockout is **scoped by device** (OWASP device cookies): failures from a browser that has signed in before count only against that browser, and failures from unknown clients lock only the "unknown client" bucket — so an attacker who knows a username cannot lock the owner out of the browser they actually use. Re-authentication on the account pages (password change, email change, disabling 2FA) is rate-limited too.
+  * generic error messages and a constant-time dummy hash, so attackers cannot discover which usernames exist
+  * a typed login is never written to the audit log verbatim (it is sometimes a mistyped password); unknown-account events record `(unknown)`
+* **Sessions:**
+  * 256-bit random tokens, stored only as SHA-256 hashes
+  * 30-minute idle and 12-hour absolute timeouts
+  * rotated at login; revoked at logout, at password change and when an admin disables the account
+* **Web hardening:**
+  * CSRF synchronizer tokens and an Origin check on every POST (the token compare is done on bytes, so a crafted non-ASCII token is rejected cleanly instead of erroring)
+  * a **Host-header allow-list** on every request, so a DNS-rebinding page on another origin cannot drive the portal; add extra names with `allowed_hosts` in `portal.toml` (loopback, the listen addresses and the configured URLs are allowed automatically)
+  * a CSP that allows no inline script, plus frame-ancestors none, nosniff and no-store
+  * `Referrer-Policy: same-origin`. With `no-referrer`, browsers send `Origin: null` on form POSTs (Fetch standard), which the Origin check would reject.
+  * all output is HTML-escaped
+* **Password recovery by email** follows the OWASP Forgot Password guidance:
+  * A random 6-digit code is emailed to the address on the account. The code is stored only as an scrypt hash, expires after 10 minutes, works once, and allows 5 wrong guesses. A newer code replaces the older one.
+  * Requests are throttled per IP and per account (one code per minute, five per hour), so the form cannot be used to flood someone's mailbox.
+  * The response and its timing are the same whether or not the account exists. Email is sent in the background and the code is hashed even for unknown accounts.
+  * A successful reset clears any lockout and signs out every session. The account owner then gets a "password was changed" email. 2FA still applies at the next sign-in.
+  * Every step is in the audit log (`password_reset_requested`, `password_reset_not_sent`, `password_reset_code_failed`, `password_reset_by_email`, `email_sent`/`email_failed`).
+  * **Recovery is only as strong as the mailbox.** Anyone who controls a user's email can reset their password. Users should protect their mailbox with 2FA. Admins should consider portal 2FA, which an email reset does not bypass.
+* **Outgoing email** goes through Nodemailer with TLS: implicit TLS on 465, or STARTTLS on 587 where TLS is required, and the certificate is always verified. Before sending, the SMTP host is resolved once and refused if it is a loopback/private/reserved address, and the connection is pinned to that resolved IP (TLS still verified against the host name) — so the email settings cannot be turned into an SSRF probe of the internal network, and there is no rebind window between the check and the send. A local relay is allowed with `allow_internal_smtp = true` in `portal.toml`.
+  * The SMTP App Password cannot be hashed (the portal must present it to the mail server), so it is **encrypted at rest** with AES-256-GCM. The key is a 32-byte file, `portal-secrets.key`, kept `0600` next to the database; stored values look like `enc:v1:…`. A copied or backed-up `portal.db` therefore does not reveal the password. **Back up `portal-secrets.key` separately** (lose it and you simply re-enter the App Password); keep it out of the same backup as the database. A plaintext value from an older database is re-encrypted automatically at start-up. The password reaches the Node process on stdin, never argv or the environment, and is never shown again in the UI.
+* **Firebase mirror (optional):**
+  * It is one-way: the portal writes to Firestore and never reads authorization data back. The VPN's access decisions stay local, so a compromised or unreachable Firebase project cannot let anyone into the VPN or lock them out.
+  * Only allow-listed fields are uploaded (see `firebase.py`). Password hashes, TOTP secrets, sessions, reset codes and the SMTP password are never sent, and a test enforces this.
+  * The mirrored data still includes names, emails, IP addresses and the audit log. Create the Firestore database in **production mode** so client access is denied, and don't relax the security rules.
+  * The service-account key grants admin rights over the Firebase project. It is stored next to the database with mode 0600 and never shown again in the UI. The signed RS256 assertion is always sent to Google's fixed token endpoint (`oauth2.googleapis.com`) over verified TLS: the `token_uri` inside a pasted key is validated but **never used as a request URL**, and the `project_id` is validated, so a tampered key cannot redirect the request (or the assertion) to an attacker's server. Malformed responses from Google are reported as errors rather than crashing the mirror.
+* **Two independent checks before VPN access:**
   1. A certificate from the trusted CA.
   2. An enabled portal account whose *current* profile serial matches that certificate.
 
   Old profiles and disabled users are rejected at handshake time and dropped from live sessions within about 2 s.
-- **Plain HTTP is limited.** Without TLS, the portal refuses to listen anywhere except loopback and VPN-tunnel addresses. Put a real certificate on it before exposing it.
+* **Plain HTTP is limited.** Without TLS, the portal refuses to listen anywhere except loopback and VPN-tunnel addresses. Put a real certificate on it before exposing it.
 
 ## Operational security checklist
 
-- Keep secrets out of version control and APKs: run `python tools/secret_scan.py` (repository) and `python tools/secret_scan.py <apk>` before publishing. Rotation procedures are in [CREDENTIALS.md](CREDENTIALS.md), and placeholder configs are in [deploy/examples/](../deploy/examples/).
-- Generate the CA on an offline machine. Protect `ca.key` with a passphrase (`ca-init` prompts for one) and keep it offline.
-- Prefer `pqvpn genkey` on each device plus `issue --pubkey`, so device private keys never travel.
-- Use short certificate lifetimes. Revoke by adding `revoked_serials` and restarting the server.
-- Run the server under the hardened systemd unit in `deploy/`. Keep the system OpenSSL patched.
-- Optionally enable `psk_file` (`pqvpn genpsk`) for defence in depth.
-- Keep `portal-secrets.key` `0600` and back it up apart from `portal.db`. Delete any old plaintext database backups made before encryption-at-rest was added (they still contain the App Password in the clear).
-- Administrators enrol an authenticator app at first sign-in (enforced). Protect the recovery mailbox with its own 2FA; an email reset does not bypass portal 2FA but does reset the password.
+* Keep secrets out of version control and APKs: run `python tools/secret_scan.py` (repository) and `python tools/secret_scan.py <apk>` before publishing. Rotation procedures are in [CREDENTIALS.md](CREDENTIALS.md), and placeholder configs are in [deploy/examples/](../deploy/examples/).
+* Generate the CA on an offline machine. Protect `ca.key` with a passphrase (`ca-init` prompts for one) and keep it offline.
+* Prefer `pqvpn genkey` on each device plus `issue --pubkey`, so device private keys never travel.
+* Use short certificate lifetimes. Revoke by adding `revoked_serials` and restarting the server.
+* Run the server under the hardened systemd unit in `deploy/`. Keep the system OpenSSL patched.
+* Optionally enable `psk_file` (`pqvpn genpsk`) for defence in depth.
+* Keep `portal-secrets.key` `0600` and back it up apart from `portal.db`. Delete any old plaintext database backups made before encryption-at-rest was added (they still contain the App Password in the clear).
+* Administrators enrol an authenticator app at first sign-in (enforced). Protect the recovery mailbox with its own 2FA; an email reset does not bypass portal 2FA but does reset the password.
