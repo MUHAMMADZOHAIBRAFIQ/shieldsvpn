@@ -147,6 +147,36 @@ class TestStoreMigration(unittest.TestCase):
             shutil.rmtree(d, ignore_errors=True)
 
 
+class TestFullTunnelProfiles(unittest.TestCase):
+    """A NAT gateway deployment issues full-tunnel profiles, and its server pushes a DNS server for them."""
+
+    def test_nat_gateway_issues_full_tunnel_profiles_with_dns(self):
+        from pqvpn.config import load_server
+        from pqvpn.portal.service import CA, FULL_TUNNEL_DNS, issue_profile
+        tmp = tempfile.mkdtemp(prefix="pqvpn-ft-")
+        try:
+            portal_init(tmp, server_name="vpn.test", endpoint="127.0.0.1:51820", subnet="10.98.0.0/24",
+                        admin="root", listen=["127.0.0.1:8800"], public_url="http://127.0.0.1:8800/",
+                        issuer="Test VPN", psk=False, nat="eth0", ca_alg="SLH-DSA-SHA2-128s")
+            cfg = load_portal(os.path.join(tmp, "portal.toml"))
+            self.assertTrue(cfg.full_tunnel)
+            scfg = load_server(os.path.join(tmp, "server.toml"))
+            self.assertEqual((scfg.nat_interface, scfg.dns), ("eth0", FULL_TUNNEL_DNS))
+
+            store, ca = Store(cfg.database), CA(cfg)
+            data, _ = issue_profile(cfg, store, ca, store.user_by_name("root"))
+            with zipfile.ZipFile(io.BytesIO(data)) as z:
+                z.extractall(tmp)
+            self.assertTrue(load_client(os.path.join(tmp, "pqvpn-root", "client.toml")).full_tunnel)
+
+            cfg.full_tunnel = False  # the option alone decides; existing portal.toml files default to split
+            data, _ = issue_profile(cfg, store, ca, store.user_by_name("root"))
+            with zipfile.ZipFile(io.BytesIO(data)) as z:
+                self.assertIn("full_tunnel = false", z.read("pqvpn-root/client.toml").decode())
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 class TestVault(unittest.TestCase):
     def test_seal_open_roundtrip_and_tamper(self):
         d = tempfile.mkdtemp(prefix="pqvpn-vault-")
@@ -1119,6 +1149,7 @@ class TestPortalEndToEnd(unittest.IsolatedAsyncioTestCase):
                                                     "psk.key"])
         ccfg = load_client(os.path.join(prof, "client.toml"))
         self.assertEqual(ccfg.server_name, "vpn.test")
+        self.assertFalse(ccfg.full_tunnel)  # portal_init without a NAT interface: split tunnel
         ident = pki.Identity.load(ccfg.certificate, ccfg.private_key)
 
         trust = pki.TrustStore.load(ccfg.ca, peer_algs=DEFAULT_PEER_SIG_ALGS,

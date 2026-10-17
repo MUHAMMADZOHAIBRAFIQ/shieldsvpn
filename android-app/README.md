@@ -134,6 +134,13 @@ echo "sdk.dir=/path/to/Android/Sdk" > local.properties     # Windows: sdk.dir=C:
 # -> app/build/outputs/apk/debug/app-debug.apk
 ```
 
+Signed release build. The keystore and its passwords never go in the repository. Point Gradle at a `keystore.properties` file (`storeFile`, `storePassword`, `keyAlias`, `keyPassword`; `storeFile` is relative to that file). Without one, the release APK is built unsigned.
+
+```bash
+./gradlew assembleRelease -Pshieldsvpn.signing=/path/to/keystore.properties
+# -> app/build/outputs/apk/release/app-release.apk  (check: apksigner verify --print-certs <apk>)
+```
+
 Rebuild the OpenSSL libraries (Linux or WSL, NDK r28c):
 
 ```bash

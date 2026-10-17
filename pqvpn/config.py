@@ -103,6 +103,7 @@ class PortalConfig:
     vpn_portal_url: str
     allowed_hosts: list[str] = field(default_factory=list)  # extra Host names (besides IPs/localhost/URLs)
     allow_internal_smtp: bool = False  # let the SMTP server be a loopback/private address (local relay)
+    full_tunnel: bool = False  # issued profiles send ALL traffic through the VPN (server needs NAT + DNS)
 
 
 _REQUIRED = object()
@@ -367,6 +368,7 @@ def load_portal(path: str) -> PortalConfig:
         vpn_portal_url=v.str("portal_url_in_vpn", ""),
         allowed_hosts=[h.lower() for h in p.strs("allowed_hosts")],
         allow_internal_smtp=p.bool("allow_internal_smtp", False),
+        full_tunnel=v.bool("full_tunnel", False),
     )
     _hostport(cfg.endpoint, "[vpn] endpoint")
     for x in (p, v):

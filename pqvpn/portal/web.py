@@ -1161,8 +1161,9 @@ def _user_actions(h: Handler, u: dict, back: str = "") -> list[str]:
         actions.append(act("reset-password", "Reset password", "", f"Generate a new temporary password for {name}?"))
     if u["totp_enabled"]:
         actions.append(act("reset-2fa", "Reset 2FA", "", f"Remove 2FA from {name}?"))
-    actions.append(act("profile", "New profile", "", f"Issue a new profile for {name}? "
-                                                    "Their current profile stops working."))
+    actions.append(act("profile", "Download profile (.zip)", "",
+                       f"Download a new VPN profile (.zip) for {name}? Every download creates a new key, "
+                       "so their current profile stops working."))
     if uid != h.user["id"]:
         actions.append(act("delete", "Delete", "danger", f"Permanently delete {name}?"))
     return actions
@@ -1261,7 +1262,8 @@ portal access and the audit log from here.</p>{_notices(notice, error)}
 
 def _create_help(h: Handler) -> str:
     return ("Only administrators can sign in to this portal. A <strong>User</strong> gets VPN access only: "
-            "click <em>New profile</em> to download their VPN profile and hand it over securely. An "
+            "click <em>Download profile (.zip)</em> and hand the file over securely (import it in the "
+            "Android app, or unzip it on a PC). An "
             "<strong>Administrator</strong> gets a one-time password to sign in here."
             if h.portal.admins_only() else
             "A one-time password is generated; the user must change it at first sign-in.")

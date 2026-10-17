@@ -48,7 +48,7 @@ portal_url = "{portal_url}"
 [tunnel]
 interface = "pqvpn0"
 mtu = 1420
-full_tunnel = false
+full_tunnel = {full_tunnel}
 routes = []
 use_server_dns = true
 persistent_keepalive = 25
@@ -101,7 +101,7 @@ def issue_profile(cfg: PortalConfig, store: Store, ca: CA, user: dict) -> tuple[
     files["client.toml"] = CLIENT_TEMPLATE.format(
         username=name, issued=issued, issuer=cfg.issuer, endpoint=cfg.endpoint, server_name=cfg.server_name,
         portal_url=cfg.vpn_portal_url or cfg.public_url, suites=", ".join(f'"{s}"' for s in cfg.suites),
-        ca_alg=ca.cert.key_alg.name, psk_line=psk_line)
+        ca_alg=ca.cert.key_alg.name, psk_line=psk_line, full_tunnel=_toml_bool(cfg.full_tunnel))
     files[f"{name}.crt"] = cert.to_pem()
     files[f"{name}.key"] = ossl.private_to_pem(key).decode("ascii")
     files["ca.crt"] = ca.pem
@@ -113,6 +113,13 @@ def issue_profile(cfg: PortalConfig, store: Store, ca: CA, user: dict) -> tuple[
         for fname, content in files.items():
             z.writestr(f"pqvpn-{name}/{fname}", content)
     return buf.getvalue(), cert
+
+
+FULL_TUNNEL_DNS = ["1.1.1.1", "1.0.0.1"]  # Cloudflare; change in server.toml or per plan in Settings
+
+
+def _toml_bool(value: bool) -> str:
+    return "true" if value else "false"
 
 
 # ------------------------------------------------------------------ first-time setup
@@ -128,7 +135,7 @@ ca = ["ca/ca.crt"]
 [tunnel]
 interface = "pqvpn0"
 mtu = 1420
-dns = []
+dns = [{dns}]
 push_routes = ["{subnet}"]
 nat_interface = "{nat}"
 
@@ -167,6 +174,9 @@ ca_private_key = "ca/ca.key"
 client_algorithm = "ML-DSA-65"
 certificate_days = 90
 portal_url_in_vpn = "{vpn_portal_url}"
+# true = issued profiles send ALL traffic through the VPN. The server then needs nat_interface and a DNS
+# server reachable through the tunnel (server.toml [tunnel] dns, or a plan DNS in Settings).
+full_tunnel = {full_tunnel}
 {psk_cfg}"""
 
 
@@ -211,11 +221,14 @@ def portal_init(data: str, *, server_name: str, endpoint: str, subnet: str, admi
     suites = ", ".join(f'"{s}"' for s in DEFAULT_SUITES)
     pki.write_file(os.path.join(data, "server.toml"), SERVER_TOML.format(
         listen=server_listen, subnet=net, nat=nat, suites=suites, ca_alg=alg.name, psk_line=psk_line,
-        vpn_portal_url=vpn_portal_url))
+        vpn_portal_url=vpn_portal_url,
+        # A NAT gateway means clients get Internet access, so full-tunnel clients also need a DNS server
+        # (Android refuses a full tunnel without one: its lookups would leak outside the VPN).
+        dns=", ".join(f'"{d}"' for d in (FULL_TUNNEL_DNS if nat else []))))
     pki.write_file(os.path.join(data, "portal.toml"), PORTAL_TOML.format(
         listen=", ".join(f'"{x}"' for x in listen), public_url=public_url, issuer=issuer,
         server_name=server_name, endpoint=endpoint, subnet=net, server_ip=server_ip,
-        vpn_portal_url=vpn_portal_url, psk_cfg=psk_cfg))
+        vpn_portal_url=vpn_portal_url, psk_cfg=psk_cfg, full_tunnel=_toml_bool(bool(nat))))
 
     store = Store(os.path.join(data, "portal.db"))
     secure_file(os.path.join(data, "portal.db"))

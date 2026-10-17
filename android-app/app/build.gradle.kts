@@ -1,3 +1,4 @@
+import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -14,6 +15,15 @@ val pqvpnPythonDir = layout.buildDirectory.dir("generated/pqvpn-python")
 val uiDir: File = rootProject.file("ui")
 val uiAssetsDir = layout.buildDirectory.dir("generated/ui-assets")
 val npm = if (System.getProperty("os.name").lowercase().contains("windows")) "npm.cmd" else "npm"
+
+// Release signing is optional and never stored in the repository. Pass the path of a keystore.properties
+// (storeFile, storePassword, keyAlias, keyPassword; storeFile relative to that file) with
+// -Pshieldsvpn.signing=<path>, or put one at android-app/keystore.properties (git-ignored).
+val signingPropsFile: File = (findProperty("shieldsvpn.signing") as String?)
+    ?.let { rootProject.file(it) } ?: rootProject.file("keystore.properties")
+val signingProps = Properties().apply {
+    if (signingPropsFile.isFile) signingPropsFile.inputStream().use { load(it) }
+}
 
 android {
     namespace = "com.shieldsvpn.vpn"
@@ -32,10 +42,22 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (!signingProps.isEmpty) {
+            create("release") {
+                storeFile = signingPropsFile.parentFile.resolve(signingProps.getProperty("storeFile"))
+                storePassword = signingProps.getProperty("storePassword")
+                keyAlias = signingProps.getProperty("keyAlias")
+                keyPassword = signingProps.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
-            // No release signing config here on purpose: sign release builds with your own keystore.
+            // Without a keystore.properties the release APK is built unsigned (app-release-unsigned.apk).
+            signingConfigs.findByName("release")?.let { signingConfig = it }
         }
     }
 
