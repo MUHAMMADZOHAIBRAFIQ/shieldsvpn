@@ -38,6 +38,7 @@ from .wire import DecodeError
 
 log = logging.getLogger("pqvpn")
 TICK = 0.5
+RECV_BATCH = 64   # datagrams drained per socket-readiness event (see BatchedUdpTransport)
 
 
 def _norm_addr(addr) -> tuple[str, int]:
@@ -604,6 +605,77 @@ class ClientNode(BaseNode):
             ka = self.cfg.persistent_keepalive
             if ka and now - peer.last_tx >= ka:
                 self.send_to_peer(peer, b"", now)
+
+
+# ====================================================================== UDP endpoint
+
+class BatchedUdpTransport:
+    """Datagram transport for selector event loops (Linux, Android, macOS) that drains bursts.
+
+    asyncio's own selector datagram transport reads one datagram per event-loop iteration.  Measured with
+    research/benchmarks/bench_dataplane.py on Linux: with packets arriving in bursts of 8 or 64 (as TUN batches
+    and TCP windows produce), 87 % / 98 % of them overflowed the socket buffer and were lost.  This transport
+    drains up to RECV_BATCH datagrams per wake-up.  Sending never blocks: a full socket buffer drops the
+    datagram (like a congested link; lost handshake datagrams are retransmitted by the protocol timers).
+    Only local I/O changes -- the wire format and the protocol logic are untouched.
+    """
+
+    def __init__(self, loop: asyncio.AbstractEventLoop, sock: socket.socket, protocol: asyncio.DatagramProtocol):
+        self._loop, self._sock, self._protocol = loop, sock, protocol
+        self._closed = False
+        sock.setblocking(False)
+        loop.add_reader(sock.fileno(), self._read_ready)
+        protocol.connection_made(self)
+
+    def get_extra_info(self, name: str, default=None):
+        if name == "socket":
+            return self._sock
+        if name == "sockname":
+            return self._sock.getsockname()
+        return default
+
+    def is_closing(self) -> bool:
+        return self._closed
+
+    def sendto(self, data: bytes, addr=None) -> None:
+        if self._closed:
+            return
+        try:
+            self._sock.sendto(data, addr)
+        except (BlockingIOError, InterruptedError):
+            pass
+        except OSError as exc:
+            self._protocol.error_received(exc)
+
+    def _read_ready(self) -> None:
+        for _ in range(RECV_BATCH):
+            if self._closed:
+                return
+            try:
+                data, addr = self._sock.recvfrom(65535)
+            except (BlockingIOError, InterruptedError):
+                return
+            except OSError as exc:   # e.g. ECONNREFUSED after an ICMP error: same handling as asyncio's
+                self._protocol.error_received(exc)
+                return
+            self._protocol.datagram_received(data, addr)
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._loop.remove_reader(self._sock.fileno())
+        self._sock.close()
+        self._loop.call_soon(self._protocol.connection_lost, None)
+
+
+async def open_udp_endpoint(protocol: asyncio.DatagramProtocol, sock: socket.socket):
+    """Attach a node to its UDP socket: the batched transport on selector loops, asyncio's otherwise."""
+    loop = asyncio.get_running_loop()
+    if isinstance(loop, asyncio.SelectorEventLoop):
+        return BatchedUdpTransport(loop, sock, protocol)
+    transport, _ = await loop.create_datagram_endpoint(lambda: protocol, sock=sock)
+    return transport
 
 
 # ====================================================================== runners

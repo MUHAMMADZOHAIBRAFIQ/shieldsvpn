@@ -1,0 +1,23 @@
+# pqvpn client configuration -- TEMPLATE. Normally generated for you inside a profile ZIP by the portal.
+[client]
+server = "<VPN_ENDPOINT_HOST>:51820"            # e.g. vpn.example.com:51820
+server_name = "<SERVER_CERT_NAME>"              # must match the server certificate subject
+certificate = "client.crt"
+private_key = "client.key"                      # secret: never commit or share
+ca = ["ca.crt"]
+
+[tunnel]
+interface = "pqvpn0"
+mtu = 1420
+full_tunnel = false        # true = send ALL traffic through the VPN (needs server-pushed DNS)
+routes = []                # empty = use routes pushed by the server
+use_server_dns = true
+persistent_keepalive = 25
+
+[crypto]
+suites = ["MLKEM768-X25519_CHACHA20POLY1305_SHA384", "MLKEM768-X25519_AES256GCM_SHA384",
+          "MLKEM1024-P384_AES256GCM_SHA384"]
+peer_signature_algorithms = ["ML-DSA-65", "ML-DSA-87"]
+ca_signature_algorithms = ["SLH-DSA-SHA2-192s"]
+rekey_interval = 120
+# psk_file = "psk.key"                          # secret: only if the server uses a PSK

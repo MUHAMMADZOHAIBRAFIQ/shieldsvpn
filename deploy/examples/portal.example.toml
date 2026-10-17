@@ -1,0 +1,25 @@
+# pqvpn portal configuration -- TEMPLATE. Copy to portal.toml and replace every <PLACEHOLDER>.
+[portal]
+listen = ["127.0.0.1:8800"]                     # put a TLS reverse proxy in front, or set tls_* below
+public_url = "https://<PORTAL_HOST>"
+database = "/var/lib/pqvpn/portal.db"           # secret-bearing: password hashes, TOTP seeds
+# tls_certificate = "/etc/pqvpn/portal.crt"
+# tls_private_key = "/etc/pqvpn/portal.key"     # secret
+allow_insecure_http = false
+issuer = "ShieldsVPN"
+require_2fa_for_admins = true
+session_idle_minutes = 30
+session_max_hours = 12
+allowed_hosts = ["<PORTAL_HOST>"]
+
+[vpn]
+server_name = "<SERVER_CERT_NAME>"
+endpoint = "<VPN_ENDPOINT_HOST>:51820"
+subnet = "10.66.0.0/24"
+reserved_addresses = ["10.66.0.1"]
+ca_certificate = "/etc/pqvpn/ca/ca.crt"
+ca_private_key = "/etc/pqvpn/ca/ca.key"         # secret: the most sensitive file of the deployment
+# ca_passphrase_file = "/etc/pqvpn/ca/ca.key.pass"
+# psk_file = "/etc/pqvpn/psk.key"               # secret
+client_algorithm = "ML-DSA-65"
+certificate_days = 90

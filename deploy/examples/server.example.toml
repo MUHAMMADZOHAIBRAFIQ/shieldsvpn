@@ -1,0 +1,35 @@
+# pqvpn server configuration -- TEMPLATE. Copy to server.toml and replace every <PLACEHOLDER>.
+# Secrets are referenced by path only; keep the key/PSK files mode 0600 and out of version control.
+[server]
+listen = "0.0.0.0:51820"
+certificate = "server.crt"
+private_key = "server.key"                      # secret: never commit
+# private_key_passphrase_file = "server.key.pass"
+ca = ["ca.crt"]
+
+[tunnel]
+interface = "pqvpn0"
+mtu = 1420
+addresses = ["10.66.0.1/24"]
+# Full-tunnel clients REQUIRE a DNS server reachable inside the tunnel; the Android app refuses to connect
+# without one (name lookups would otherwise leave the tunnel).  Use a resolver you run on/behind the server.
+dns = ["10.66.0.1"]
+push_routes = ["10.66.0.0/24"]
+nat_interface = ""                              # e.g. "eth0" to give clients Internet access (Linux)
+
+[crypto]
+suites = ["MLKEM768-X25519_CHACHA20POLY1305_SHA384", "MLKEM768-X25519_AES256GCM_SHA384",
+          "MLKEM1024-P384_AES256GCM_SHA384"]
+peer_signature_algorithms = ["ML-DSA-65", "ML-DSA-87"]
+ca_signature_algorithms = ["SLH-DSA-SHA2-192s"]
+rekey_interval = 120
+# psk_file = "psk.key"                          # secret: `pqvpn genpsk > psk.key`, same file on every client
+
+[security]
+revoked_serials = []                            # e.g. ["<CERT_SERIAL_HEX>"] from `pqvpn show client.crt`
+max_peers = 1024
+cookie_threshold = 64
+handshake_rate_per_ip = 5
+
+# [portal]
+# database = "/var/lib/pqvpn/portal.db"         # secret-bearing database: enables account-based access control

@@ -169,6 +169,16 @@ python -m pqvpn tray -c client.toml                      # or double-click the s
 
 Windows 10 hides new tray icons under `^` until you drag them onto the taskbar once.
 
+## Android app
+
+`android-app/` is a native Android client. Its screen is a React app (TypeScript, built with Node.js and Vite) shown in a locked-down WebView. The VPN runs in a Kotlin `VpnService` with this repo's Python engine embedded through Chaquopy, and OpenSSL 3.5 built for Android. It speaks the same protocol as the desktop clients, so the existing server needs no changes. Users import the profile ZIP they download from the portal. The private key is stored encrypted under an Android Keystore key, and the tunnel interface is created only after the post-quantum handshake has authenticated the server and its pushed configuration.
+
+```bash
+cd android-app && ./gradlew assembleDebug     # needs Node.js 22.12+; -> app/build/outputs/apk/debug/app-debug.apk
+```
+
+Build steps, design, permissions, what has and has not been verified, limitations and troubleshooting are in [android-app/README.md](android-app/README.md). The older `android/` folder is a Capacitor wrapper of the landing page and is not a VPN client.
+
 ## Operations
 
 | Task | Command |
@@ -230,6 +240,8 @@ pqvpn/cli.py             command line
 pqvpn/portal/            web portal: auth (scrypt, TOTP), store (SQLite), web UI, QR codes, access control,
                          plans.py (Free/Premium + DNS per plan), mail.py + mailer/ (Nodemailer email),
                          firebase.py (one-way Firestore mirror)
+pqvpn/android_client.py  Android integration: profile import, tunnel-setting validation, TUN adapter, session
+android-app/             Android app (Kotlin VpnService + Chaquopy), OpenSSL build scripts in android-app/native/
 pqvpn/winui.py           Windows notification-area app (Shell_NotifyIcon via ctypes)
 pqvpn/logo.py            shield logo: SVG + anti-aliased PNG/ICO renderer
 ```

@@ -1,0 +1,25 @@
+ShieldsVPN for Android - third-party software
+=============================================
+
+This app contains the following third-party software. The full licence texts are in this folder
+(assets/licenses/ inside the APK).
+
+OpenSSL 3.5.9 (libcrypto_pqvpn.so - ML-KEM, ML-DSA, SLH-DSA, X25519, P-384, AES-GCM, ChaCha20-Poly1305)
+    Licence: Apache License 2.0                                   -> OpenSSL-LICENSE.txt
+    Built from the unmodified upstream source tarball; see android-app/native/PROVENANCE.md in the source tree.
+
+Python 3.13.16 runtime and standard library, as packaged by Chaquopy
+    Licence: Python Software Foundation License Version 2         -> Python-LICENSE.txt
+    The Python build ships OpenSSL 3.5.9 (Apache-2.0, libcrypto_python.so / libssl_python.so) and
+    SQLite 3.53.4 (public domain, libsqlite3_python.so); its extension modules also include code from
+    libffi, bzip2, xz/liblzma, expat and mpdecimal (and use zlib). Their notices are listed in the "Licenses and
+    Acknowledgements for Incorporated Software" section of the Python documentation:
+    https://docs.python.org/3.13/license.html
+
+Chaquopy 17.1 (Python-on-Android runtime)
+    Licence: MIT                                                  -> Chaquopy-LICENSE.txt
+
+React 19.3.1, React DOM 19.3.1, scheduler (bundled into assets/ui/)
+    Licence: MIT                                                  -> React-LICENSE.txt
+
+pqvpn (the VPN protocol implementation, bundled as Python code) is part of ShieldsVPN itself.

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Same palette as the desktop app and the portal. -->
+    <color name="bg">#0B1020</color>
+    <color name="card">#111A2E</color>
+    <color name="line">#1E293B</color>
+    <color name="ink">#E2E8F0</color>
+    <color name="muted">#94A3B8</color>
+    <color name="faint">#475569</color>
+    <color name="brand">#6366F1</color>
+    <color name="brand2">#22D3EE</color>
+    <color name="state_off">#64748B</color>
+    <color name="state_busy">#F59E0B</color>
+    <color name="state_on">#22C55E</color>
+    <color name="state_error">#EF4444</color>
+</resources>

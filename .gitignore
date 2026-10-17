@@ -1,11 +1,39 @@
-# private keys and generated PKI never belong in version control
+# ------------------------------------------------------------------ secrets: never commit
+# Private keys, PSKs, vault keys (pqvpn writes them as *.key)
 *.key
+*.pem
+!docs/**/*.pem
+# Generated PKI / deployments / downloaded profiles (contain private keys and PSKs)
 vpn-pki*/
-__pycache__/
-*.pyc
-wintun.dll
 vpn-profiles/
-node_modules/
+.local-pqvpn/
+pqvpn-*.zip
+*-profile*.zip
+# Portal databases (password hashes, sessions, sealed SMTP password) and their WAL files
+*.db
+*.db-wal
+*.db-shm
+*.db.bak*
+portal-secrets.key
 # Firebase service-account keys (full admin access to the Firebase project)
 firebase-key*.json
 *-firebase-adminsdk-*.json
+# Android signing material
+*.jks
+*.keystore
+keystore.properties
+android/keystore.properties
+# Environment files
+.env
+.env.*
+
+# ------------------------------------------------------------------ build / tooling output
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.pytest-*.txt
+.venv*/
+node_modules/
+wintun.dll
+research/results/raw/

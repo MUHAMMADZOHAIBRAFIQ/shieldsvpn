@@ -17,7 +17,7 @@ from .config import ClientConfig, CryptoConfig, ServerConfig
 from .crypto import ossl
 from .crypto.suites import DEFAULT_CA_SIG_ALGS, DEFAULT_PEER_SIG_ALGS, SUITES_BY_NAME, sig_alg_by_name
 from .netcfg import NetConfig
-from .node import ClientNode, ServerNode, make_udp_socket
+from .node import ClientNode, ServerNode, make_udp_socket, open_udp_endpoint
 from .tun import MemoryTun, open_tun
 
 log = logging.getLogger("pqvpn")
@@ -71,7 +71,7 @@ async def run_server(cfg: ServerConfig) -> None:
         family = socket.AF_INET6 if ":" in cfg.listen_host else socket.AF_INET
         sock = make_udp_socket(cfg.listen_host, cfg.listen_port, family)
         loop = asyncio.get_running_loop()
-        await loop.create_datagram_endpoint(lambda: node, sock=sock)
+        await open_udp_endpoint(node, sock)
         tun.start(loop, node.on_tun_packets)
         node.start_timers()
         log.info("pqvpn server '%s' listening on %s:%d, tunnel %s %s", identity.cert.subject,
@@ -99,7 +99,7 @@ async def run_client(cfg: ClientConfig, on_state=None) -> None:
     try:
         sock = make_udp_socket("::" if family == socket.AF_INET6 else "0.0.0.0", 0, family)
         node = ClientNode(cfg, identity, trust, tun, endpoint, net, on_state)
-        await loop.create_datagram_endpoint(lambda: node, sock=sock)
+        await open_udp_endpoint(node, sock)
         tun.start(loop, node.on_tun_packets)
         node.start_timers()
         log.info("connecting to %s (%s:%d) as '%s'...", cfg.server_name, endpoint[0], endpoint[1],
@@ -195,13 +195,11 @@ async def loopback_pair(tp: TestPKI, scfg: ServerConfig, ccfg_kw: dict | None = 
     c_id = client_identity or tp.identity(pki.ROLE_CLIENT, "alice", ["10.66.0.2/32"])
     s_tun, c_tun = MemoryTun("s"), MemoryTun("c")
     server = ServerNode(scfg, s_id, server_trust or tp.trust(), s_tun, access)
-    s_tr, _ = await loop.create_datagram_endpoint(
-        lambda: server, sock=make_udp_socket("127.0.0.1", 0, socket.AF_INET))
+    s_tr = await open_udp_endpoint(server, make_udp_socket("127.0.0.1", 0, socket.AF_INET))
     port = s_tr.get_extra_info("sockname")[1]
     ccfg = client_cfg(client_crypto or scfg.crypto, port, **(ccfg_kw or {}))
     client = ClientNode(ccfg, c_id, client_trust or tp.trust(), c_tun, ("127.0.0.1", port))
-    await loop.create_datagram_endpoint(
-        lambda: client, sock=make_udp_socket("127.0.0.1", 0, socket.AF_INET))
+    await open_udp_endpoint(client, make_udp_socket("127.0.0.1", 0, socket.AF_INET))
     s_tun.start(loop, server.on_tun_packets)
     c_tun.start(loop, client.on_tun_packets)
     server.start_timers()

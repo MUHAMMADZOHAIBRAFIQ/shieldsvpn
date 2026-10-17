@@ -64,11 +64,20 @@ def _candidate_paths() -> list[str]:
     if sys.platform == "win32":
         import ssl  # noqa: F401  -- forces Python's libcrypto into the process
 
-        paths += ["libcrypto-3-x64.dll", "libcrypto-3.dll"]
+        # OpenSSL 3.5+ is required for the PQ algorithms.  OpenSSL 4 uses a
+        # versioned DLL name too, so try both supported major versions.
+        names = ("libcrypto-4-x64.dll", "libcrypto-4.dll",
+                 "libcrypto-3-x64.dll", "libcrypto-3.dll")
+        paths += list(names)
         exe_dir = os.path.dirname(sys.executable)
-        for name in ("libcrypto-3-x64.dll", "libcrypto-3.dll"):
+        for name in names:
             paths.append(os.path.join(exe_dir, name))
             paths.append(os.path.join(exe_dir, "DLLs", name))
+        # Default location of the Shining Light Productions Windows installer.
+        for prefix in filter(None, (os.environ.get("ProgramFiles"),
+                                    os.environ.get("ProgramW6432"))):
+            for name in names:
+                paths.append(os.path.join(prefix, "OpenSSL-Win64", "bin", name))
     elif sys.platform == "darwin":
         paths += [
             "libcrypto.3.dylib",

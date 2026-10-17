@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Native strings only: the screen itself is the React UI (android-app/ui). -->
+<resources>
+    <string name="app_name">ShieldsVPN</string>
+
+    <string name="state_preparing">Preparing VPN</string>
+    <string name="state_connecting">Connecting</string>
+    <string name="state_connected">Connected</string>
+    <string name="state_reconnecting">Reconnecting</string>
+    <string name="state_error">Error</string>
+
+    <string name="sub_preparing">Starting the secure engine…</string>
+    <string name="sub_waiting_permission">Waiting for the Android VPN permission…</string>
+    <string name="sub_reconnecting">The connection dropped. Restoring it; your traffic stays in the tunnel.</string>
+    <string name="sub_disconnecting">Closing the tunnel…</string>
+
+    <string name="permission_declined">VPN permission was declined. ShieldsVPN cannot connect without it.</string>
+    <string name="permission_needed_service">VPN permission is required. Open ShieldsVPN and tap Connect.</string>
+    <string name="no_profile_error">No profile is installed. Import the profile .zip from the portal first.</string>
+
+    <string name="import_profile">Import profile</string>
+    <string name="import_ok">Profile for %1$s installed.</string>
+    <string name="import_failed_title">Import failed</string>
+    <string name="remove_profile">Remove profile</string>
+    <string name="profile_removed">Profile removed from this phone.</string>
+    <string name="disconnect_first">Disconnect first.</string>
+    <string name="open_portal">Open portal</string>
+    <string name="no_browser">No browser is installed to open the portal.</string>
+    <string name="vpn_settings">VPN settings</string>
+    <string name="no_vpn_settings">This device has no VPN settings screen.</string>
+
+    <string name="notif_channel">VPN status</string>
+    <string name="notif_channel_desc">Shown while ShieldsVPN is connecting or connected.</string>
+    <string name="notif_disconnect">Disconnect</string>
+</resources>

@@ -225,6 +225,49 @@ class TestWire(unittest.TestCase):
         self.assertTrue(jar.check(c, "1.2.3.4", 5, 6, b"n" * 32, 1e9))  # previous secret still valid
 
 
+class TestBatchedReceive(unittest.IsolatedAsyncioTestCase):
+    """Regression: asyncio's selector datagram transport read one datagram per loop turn and dropped bursts."""
+
+    async def test_drains_bursts_and_cleans_up(self):
+        import socket
+        from pqvpn.node import RECV_BATCH, BaseNode, BatchedUdpTransport, make_udp_socket, open_udp_endpoint
+
+        class Probe(BaseNode):
+            def __init__(self):
+                super().__init__(tun=None, mtu=1420, rekey_interval=120)
+                self.got = []
+                self.lost = False
+
+            def datagram_received(self, data, addr):
+                self.got.append(data)
+
+            def connection_lost(self, exc):
+                self.lost = True
+                super().connection_lost(exc)
+
+        node = Probe()
+        sock = make_udp_socket("127.0.0.1", 0, socket.AF_INET)
+        addr = sock.getsockname()
+        tr = await open_udp_endpoint(node, sock)
+        if not isinstance(tr, BatchedUdpTransport):
+            tr.close()
+            self.skipTest("not a selector event loop: Windows Proactor keeps asyncio's own transport (not benchmarked)")
+        tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        n = 3 * RECV_BATCH + 5
+        for i in range(n):
+            tx.sendto(i.to_bytes(2, "big"), addr)
+        await asyncio.sleep(0.2)
+        self.assertEqual(node.got, [i.to_bytes(2, "big") for i in range(n)])   # all delivered, in order
+        node.transport.sendto(b"reply", tx.getsockname())                        # sending works too
+        self.assertEqual(tx.recvfrom(16)[0], b"reply")
+        tx.close()
+        tr.close()
+        await asyncio.sleep(0.05)
+        self.assertTrue(node.lost and node.closed.is_set())
+        self.assertEqual(sock.fileno(), -1)                                       # socket closed, reader removed
+        tr.sendto(b"late", addr)                                                  # no-op after close
+
+
 # ====================================================================== handshake (state machines)
 
 def _drive(initiator: Initiator, responder: Responder, tamper_init=None):
@@ -350,6 +393,29 @@ class TestEndToEnd(unittest.IsolatedAsyncioTestCase):
     async def ping(self, c_tun, s_tun, seq=1):
         c_tun.inject(icmp_echo("10.66.0.2", "10.66.0.1", seq))
         return await asyncio.wait_for(s_tun.written.get(), 3)
+
+    async def test_receiver_accepts_larger_sender_padding(self):
+        """Wire compatibility of padding (research/TRAFFIC_ANALYSIS.md): receivers strip padding by the IP length
+        field, so a sender that pads further (here: every packet to the MTU) interoperates with unmodified
+        receive code.  Only the sender's pad() is replaced; ServerNode/ClientNode receive paths are untouched."""
+        import pqvpn.node as node_mod
+        from pqvpn.protocol import DATA_OVERHEAD
+        server, client, s_tun, c_tun = await self.pair()
+        await self.connect(client)
+        sizes = []
+        real_sendto = client.transport.sendto
+        client.transport.sendto = lambda d, a=None: (sizes.append(len(d)), real_sendto(d, a))[1]
+        orig = node_mod.pad
+        node_mod.pad = lambda pkt, mtu: pkt + bytes(max(mtu - len(pkt), 0))
+        try:
+            for i, n in enumerate((0, 1, 72, 500, 1391)):
+                pkt = icmp_echo("10.66.0.2", "10.66.0.1", i, os.urandom(n))
+                c_tun.inject(pkt)
+                self.assertEqual(await asyncio.wait_for(s_tun.written.get(), 3), pkt)
+        finally:
+            node_mod.pad = orig
+            client.transport.sendto = real_sendto
+        self.assertTrue(sizes and all(s == 1420 + DATA_OVERHEAD for s in sizes), sizes)
 
     async def test_bidirectional_traffic(self):
         server, client, s_tun, c_tun = await self.pair()

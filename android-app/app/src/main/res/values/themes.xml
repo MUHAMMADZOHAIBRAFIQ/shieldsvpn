@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The window behind the WebView: same colour as the React UI, so there is no white flash on start. -->
+    <style name="Theme.ShieldsVPN" parent="Theme.AppCompat.NoActionBar">
+        <item name="colorPrimary">@color/brand</item>
+        <item name="colorPrimaryDark">@color/bg</item>
+        <item name="colorAccent">@color/brand2</item>
+        <item name="android:colorBackground">@color/bg</item>
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+
+    <!-- Launch theme: Android's splash screen (shield icon on the app background) stays up until the React
+         UI has rendered its first frame (MainActivity keeps it on screen until the page reports "ready"). -->
+    <style name="Theme.ShieldsVPN.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/bg</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="postSplashScreenTheme">@style/Theme.ShieldsVPN</item>
+    </style>
+</resources>

@@ -1,0 +1,4562 @@
+{
+  "setup": {
+    "traces_per_class_per_env": 50,
+    "classes": [
+      "web",
+      "video",
+      "voip",
+      "bulk",
+      "chat",
+      "interactive"
+    ],
+    "environments": {
+      "A": {
+        "rtt": 0.02,
+        "bw": 50000000.0,
+        "mtu": 1420,
+        "jitter": 0.001
+      },
+      "B": {
+        "rtt": 0.08,
+        "bw": 8000000.0,
+        "mtu": 1280,
+        "jitter": 0.004
+      }
+    },
+    "window_s": 5.0,
+    "seeds": [
+      1,
+      2,
+      3
+    ],
+    "wire_size_checks": 40,
+    "chance_accuracy": 0.16666666666666666
+  },
+  "environment": {
+    "python": "3.12.3",
+    "implementation": "CPython",
+    "openssl": "OpenSSL 3.5.9 29 Sep 2026",
+    "os": "Linux-6.6.87.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "processor": "x86_64",
+    "cpu_count": 12,
+    "date_utc": "2026-10-17T18:32:28Z"
+  },
+  "runs": [
+    {
+      "defences": {
+        "none (reference)": {
+          "classifiers": {
+            "kNN (k=5)": {
+              "cross_environment": {
+                "accuracy": 0.7516666666666667,
+                "macro": {
+                  "precision": 0.6759412983981324,
+                  "recall": 0.7516666666666666,
+                  "f1": 0.6989827869531037,
+                  "fpr": 0.049666666666666665
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.5208333333333334,
+                    "recall": 1.0,
+                    "f1": 0.684931506849315,
+                    "fpr": 0.184
+                  },
+                  "video": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "voip": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "fpr": 0.0
+                  },
+                  "bulk": {
+                    "precision": 0.5447154471544715,
+                    "recall": 0.67,
+                    "f1": 0.6008968609865469,
+                    "fpr": 0.112
+                  },
+                  "chat": {
+                    "precision": 1.0,
+                    "recall": 0.84,
+                    "f1": 0.9130434782608696,
+                    "fpr": 0.0
+                  },
+                  "interactive": {
+                    "precision": 0.9900990099009901,
+                    "recall": 1.0,
+                    "f1": 0.9950248756218906,
+                    "fpr": 0.002
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 50,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 50,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 100,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "bulk": {
+                    "web": 33,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 67,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 9,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 6,
+                    "chat": 84,
+                    "interactive": 1
+                  },
+                  "interactive": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 100
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.7593093056203882,
+                "train B -> test A": 0.6548991534998998
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.9866666666666667,
+                "macro": {
+                  "precision": 0.9885057471264368,
+                  "recall": 0.9866666666666667,
+                  "f1": 0.9871031746031745,
+                  "fpr": 0.002710027100271003
+                }
+              }
+            },
+            "nearest centroid": {
+              "cross_environment": {
+                "accuracy": 0.785,
+                "macro": {
+                  "precision": 0.8482562256989623,
+                  "recall": 0.785,
+                  "f1": 0.785769217559098,
+                  "fpr": 0.043000000000000003
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.4975124378109453,
+                    "recall": 1.0,
+                    "f1": 0.6644518272425249,
+                    "fpr": 0.202
+                  },
+                  "video": {
+                    "precision": 0.704225352112676,
+                    "recall": 0.5,
+                    "f1": 0.5847953216374269,
+                    "fpr": 0.042
+                  },
+                  "voip": {
+                    "precision": 1.0,
+                    "recall": 0.99,
+                    "f1": 0.9949748743718593,
+                    "fpr": 0.0
+                  },
+                  "bulk": {
+                    "precision": 0.9074074074074074,
+                    "recall": 0.49,
+                    "f1": 0.6363636363636364,
+                    "fpr": 0.01
+                  },
+                  "chat": {
+                    "precision": 1.0,
+                    "recall": 0.73,
+                    "f1": 0.8439306358381503,
+                    "fpr": 0.0
+                  },
+                  "interactive": {
+                    "precision": 0.9803921568627451,
+                    "recall": 1.0,
+                    "f1": 0.99009900990099,
+                    "fpr": 0.004
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 50,
+                    "video": 50,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 99,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 1
+                  },
+                  "bulk": {
+                    "web": 30,
+                    "video": 21,
+                    "voip": 0,
+                    "bulk": 49,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 21,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 5,
+                    "chat": 73,
+                    "interactive": 1
+                  },
+                  "interactive": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 100
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.8893748100909226,
+                "train B -> test A": 0.6395774506343511
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.8466666666666667,
+                "macro": {
+                  "precision": 0.874561403508772,
+                  "recall": 0.8560493827160495,
+                  "f1": 0.8308525917221569,
+                  "fpr": 0.029613679003922908
+                }
+              }
+            }
+          },
+          "knn_cross_env_f1_feature_ablation": {
+            "size features only": 0.9781952554616343,
+            "timing/volume/order features only": 0.537322628898004
+          },
+          "cost": {
+            "wire_bytes_vs_pad16_pct_by_class": {
+              "web": -0.46897995975021534,
+              "video": -0.4125787614557064,
+              "voip": -4.1837992261441475,
+              "bulk": -0.40499141741039413,
+              "chat": -0.5286811829767757,
+              "interactive": -3.8542461234473357
+            },
+            "wire_bytes_vs_pad16_pct": -0.42788351069493746,
+            "wire_bytes_vs_ip_pct": 3.47032703745791,
+            "datagrams_seen_vs_real_packets": 1.0,
+            "added_latency_ms_median": 0.0,
+            "added_latency_ms_p95": 0.0,
+            "real_packets_not_sent_within_window_pct": 0.0
+          }
+        },
+        "pad16 (production)": {
+          "classifiers": {
+            "kNN (k=5)": {
+              "cross_environment": {
+                "accuracy": 0.7616666666666667,
+                "macro": {
+                  "precision": 0.6817055697505235,
+                  "recall": 0.7616666666666667,
+                  "f1": 0.7074705735349882,
+                  "fpr": 0.04766666666666666
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.5376344086021505,
+                    "recall": 1.0,
+                    "f1": 0.6993006993006993,
+                    "fpr": 0.172
+                  },
+                  "video": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "voip": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "fpr": 0.0
+                  },
+                  "bulk": {
+                    "precision": 0.5625,
+                    "recall": 0.72,
+                    "f1": 0.631578947368421,
+                    "fpr": 0.112
+                  },
+                  "chat": {
+                    "precision": 1.0,
+                    "recall": 0.85,
+                    "f1": 0.9189189189189189,
+                    "fpr": 0.0
+                  },
+                  "interactive": {
+                    "precision": 0.9900990099009901,
+                    "recall": 1.0,
+                    "f1": 0.9950248756218906,
+                    "fpr": 0.002
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 50,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 50,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 100,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "bulk": {
+                    "web": 28,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 72,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 8,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 6,
+                    "chat": 85,
+                    "interactive": 1
+                  },
+                  "interactive": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 100
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.7593093056203882,
+                "train B -> test A": 0.6769648329956887
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.9866666666666667,
+                "macro": {
+                  "precision": 0.9885057471264368,
+                  "recall": 0.9866666666666667,
+                  "f1": 0.9871031746031745,
+                  "fpr": 0.002710027100271003
+                }
+              }
+            },
+            "nearest centroid": {
+              "cross_environment": {
+                "accuracy": 0.8116666666666666,
+                "macro": {
+                  "precision": 0.8754168334000267,
+                  "recall": 0.8116666666666666,
+                  "f1": 0.8157310130232694,
+                  "fpr": 0.03766666666666667
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.5102040816326531,
+                    "recall": 1.0,
+                    "f1": 0.6756756756756758,
+                    "fpr": 0.192
+                  },
+                  "video": {
+                    "precision": 0.8333333333333334,
+                    "recall": 0.5,
+                    "f1": 0.625,
+                    "fpr": 0.02
+                  },
+                  "voip": {
+                    "precision": 1.0,
+                    "recall": 0.99,
+                    "f1": 0.9949748743718593,
+                    "fpr": 0.0
+                  },
+                  "bulk": {
+                    "precision": 0.9285714285714286,
+                    "recall": 0.65,
+                    "f1": 0.7647058823529412,
+                    "fpr": 0.01
+                  },
+                  "chat": {
+                    "precision": 1.0,
+                    "recall": 0.73,
+                    "f1": 0.8439306358381503,
+                    "fpr": 0.0
+                  },
+                  "interactive": {
+                    "precision": 0.9803921568627451,
+                    "recall": 1.0,
+                    "f1": 0.99009900990099,
+                    "fpr": 0.004
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 50,
+                    "video": 50,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 99,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 1
+                  },
+                  "bulk": {
+                    "web": 25,
+                    "video": 10,
+                    "voip": 0,
+                    "bulk": 65,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 21,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 5,
+                    "chat": 73,
+                    "interactive": 1
+                  },
+                  "interactive": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 100
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.9402144696262343,
+                "train B -> test A": 0.6459295607537724
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.88,
+                "macro": {
+                  "precision": 0.8975772765246449,
+                  "recall": 0.8869135802469136,
+                  "f1": 0.8720561329256982,
+                  "fpr": 0.023203422593666496
+                }
+              }
+            }
+          },
+          "knn_cross_env_f1_feature_ablation": {
+            "size features only": 0.9780019084701036,
+            "timing/volume/order features only": 0.5408290248364063
+          },
+          "cost": {
+            "wire_bytes_vs_pad16_pct_by_class": {
+              "web": 0.0,
+              "video": 0.0,
+              "voip": 0.0,
+              "bulk": 0.0,
+              "chat": 0.0,
+              "interactive": 0.0
+            },
+            "wire_bytes_vs_pad16_pct": 0.0,
+            "wire_bytes_vs_ip_pct": 3.9149620251082373,
+            "datagrams_seen_vs_real_packets": 1.0,
+            "added_latency_ms_median": 0.0,
+            "added_latency_ms_p95": 0.0,
+            "real_packets_not_sent_within_window_pct": 0.0
+          }
+        },
+        "bucket 128/256/512/1024/MTU": {
+          "classifiers": {
+            "kNN (k=5)": {
+              "cross_environment": {
+                "accuracy": 0.765,
+                "macro": {
+                  "precision": 0.8523551815548226,
+                  "recall": 0.765,
+                  "f1": 0.7367947424762868,
+                  "fpr": 0.04699999999999999
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.49019607843137253,
+                    "recall": 1.0,
+                    "f1": 0.6578947368421052,
+                    "fpr": 0.208
+                  },
+                  "video": {
+                    "precision": 1.0,
+                    "recall": 0.13,
+                    "f1": 0.23008849557522126,
+                    "fpr": 0.0
+                  },
+                  "voip": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "fpr": 0.0
+                  },
+                  "bulk": {
+                    "precision": 0.6530612244897959,
+                    "recall": 0.64,
+                    "f1": 0.6464646464646464,
+                    "fpr": 0.068
+                  },
+                  "chat": {
+                    "precision": 1.0,
+                    "recall": 0.82,
+                    "f1": 0.9010989010989011,
+                    "fpr": 0.0
+                  },
+                  "interactive": {
+                    "precision": 0.970873786407767,
+                    "recall": 1.0,
+                    "f1": 0.9852216748768473,
+                    "fpr": 0.006
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 57,
+                    "video": 13,
+                    "voip": 0,
+                    "bulk": 30,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 100,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "bulk": {
+                    "web": 36,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 64,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 11,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 4,
+                    "chat": 82,
+                    "interactive": 3
+                  },
+                  "interactive": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 100
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.8387102360655647,
+                "train B -> test A": 0.628192096780683
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.9866666666666667,
+                "macro": {
+                  "precision": 0.9878747795414462,
+                  "recall": 0.9866666666666667,
+                  "f1": 0.9868805984372022,
+                  "fpr": 0.0026990995716408782
+                }
+              }
+            },
+            "nearest centroid": {
+              "cross_environment": {
+                "accuracy": 0.8033333333333333,
+                "macro": {
+                  "precision": 0.8854822419523675,
+                  "recall": 0.8033333333333333,
+                  "f1": 0.8086308156640011,
+                  "fpr": 0.03933333333333333
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.4878048780487805,
+                    "recall": 1.0,
+                    "f1": 0.6557377049180327,
+                    "fpr": 0.21
+                  },
+                  "video": {
+                    "precision": 0.9090909090909091,
+                    "recall": 0.5,
+                    "f1": 0.6451612903225806,
+                    "fpr": 0.01
+                  },
+                  "voip": {
+                    "precision": 0.9705882352941176,
+                    "recall": 0.99,
+                    "f1": 0.9801980198019802,
+                    "fpr": 0.006
+                  },
+                  "bulk": {
+                    "precision": 0.9838709677419355,
+                    "recall": 0.61,
+                    "f1": 0.7530864197530864,
+                    "fpr": 0.002
+                  },
+                  "chat": {
+                    "precision": 1.0,
+                    "recall": 0.72,
+                    "f1": 0.8372093023255813,
+                    "fpr": 0.0
+                  },
+                  "interactive": {
+                    "precision": 0.9615384615384616,
+                    "recall": 1.0,
+                    "f1": 0.9803921568627451,
+                    "fpr": 0.008
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 50,
+                    "video": 50,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 99,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 1
+                  },
+                  "bulk": {
+                    "web": 34,
+                    "video": 5,
+                    "voip": 0,
+                    "bulk": 61,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 21,
+                    "video": 0,
+                    "voip": 3,
+                    "bulk": 1,
+                    "chat": 72,
+                    "interactive": 3
+                  },
+                  "interactive": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 100
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.9478804241573268,
+                "train B -> test A": 0.6135932232097966
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.9733333333333334,
+                "macro": {
+                  "precision": 0.9702380952380952,
+                  "recall": 0.9733333333333333,
+                  "f1": 0.9696564305259958,
+                  "fpr": 0.00514289233801429
+                }
+              }
+            }
+          },
+          "knn_cross_env_f1_feature_ablation": {
+            "size features only": 0.9673312471479886,
+            "timing/volume/order features only": 0.5374787953436281
+          },
+          "cost": {
+            "wire_bytes_vs_pad16_pct_by_class": {
+              "web": 3.9510418615192,
+              "video": 2.22944282139943,
+              "voip": 36.10011243095273,
+              "bulk": 2.1599542261887983,
+              "chat": 3.797913829543176,
+              "interactive": 25.682214159655704
+            },
+            "wire_bytes_vs_pad16_pct": 2.4509137532508385,
+            "wire_bytes_vs_ip_pct": 6.461828121067015,
+            "datagrams_seen_vs_real_packets": 1.0,
+            "added_latency_ms_median": 0.0,
+            "added_latency_ms_p95": 0.0,
+            "real_packets_not_sent_within_window_pct": 0.0
+          }
+        },
+        "pad to MTU": {
+          "classifiers": {
+            "kNN (k=5)": {
+              "cross_environment": {
+                "accuracy": 0.6083333333333333,
+                "macro": {
+                  "precision": 0.47647770941496487,
+                  "recall": 0.6083333333333333,
+                  "f1": 0.5089332410206857,
+                  "fpr": 0.07833333333333332
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.43243243243243246,
+                    "recall": 0.96,
+                    "f1": 0.5962732919254659,
+                    "fpr": 0.252
+                  },
+                  "video": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "voip": {
+                    "precision": 0.48258706467661694,
+                    "recall": 0.97,
+                    "f1": 0.6445182724252493,
+                    "fpr": 0.208
+                  },
+                  "bulk": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "chat": {
+                    "precision": 0.972972972972973,
+                    "recall": 0.72,
+                    "f1": 0.8275862068965518,
+                    "fpr": 0.004
+                  },
+                  "interactive": {
+                    "precision": 0.970873786407767,
+                    "recall": 1.0,
+                    "f1": 0.9852216748768473,
+                    "fpr": 0.006
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 96,
+                    "video": 0,
+                    "voip": 2,
+                    "bulk": 0,
+                    "chat": 2,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 65,
+                    "video": 0,
+                    "voip": 35,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 97,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 3
+                  },
+                  "bulk": {
+                    "web": 50,
+                    "video": 0,
+                    "voip": 50,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 11,
+                    "video": 0,
+                    "voip": 17,
+                    "bulk": 0,
+                    "chat": 72,
+                    "interactive": 0
+                  },
+                  "interactive": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 100
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.5101565164465572,
+                "train B -> test A": 0.5550560239118504
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.9933333333333333,
+                "macro": {
+                  "precision": 0.9938271604938271,
+                  "recall": 0.9950980392156863,
+                  "f1": 0.994367783722895,
+                  "fpr": 0.0013440860215053762
+                }
+              }
+            },
+            "nearest centroid": {
+              "cross_environment": {
+                "accuracy": 0.6233333333333333,
+                "macro": {
+                  "precision": 0.5662484053788401,
+                  "recall": 0.6233333333333333,
+                  "f1": 0.5657398832434848,
+                  "fpr": 0.07533333333333334
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.44545454545454544,
+                    "recall": 0.98,
+                    "f1": 0.6125,
+                    "fpr": 0.244
+                  },
+                  "video": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "voip": {
+                    "precision": 0.6428571428571429,
+                    "recall": 0.99,
+                    "f1": 0.7795275590551181,
+                    "fpr": 0.11
+                  },
+                  "bulk": {
+                    "precision": 0.42028985507246375,
+                    "recall": 0.29,
+                    "f1": 0.3431952662721894,
+                    "fpr": 0.08
+                  },
+                  "chat": {
+                    "precision": 0.8888888888888888,
+                    "recall": 0.72,
+                    "f1": 0.7955801104972375,
+                    "fpr": 0.018
+                  },
+                  "interactive": {
+                    "precision": 1.0,
+                    "recall": 0.76,
+                    "f1": 0.8636363636363636,
+                    "fpr": 0.0
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 98,
+                    "video": 0,
+                    "voip": 2,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 61,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 39,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 99,
+                    "bulk": 1,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "bulk": {
+                    "web": 50,
+                    "video": 0,
+                    "voip": 21,
+                    "bulk": 29,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 11,
+                    "video": 0,
+                    "voip": 17,
+                    "bulk": 0,
+                    "chat": 72,
+                    "interactive": 0
+                  },
+                  "interactive": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 15,
+                    "bulk": 0,
+                    "chat": 9,
+                    "interactive": 76
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.6174500756793865,
+                "train B -> test A": 0.5080562655107735
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.9333333333333333,
+                "macro": {
+                  "precision": 0.9407536907536908,
+                  "recall": 0.9348717948717948,
+                  "f1": 0.9324481813304949,
+                  "fpr": 0.013567746429815397
+                }
+              }
+            }
+          },
+          "knn_cross_env_f1_feature_ablation": {
+            "size features only": 0.047619047619047616,
+            "timing/volume/order features only": 0.5089332410206857
+          },
+          "cost": {
+            "wire_bytes_vs_pad16_pct_by_class": {
+              "web": 49.674819494870384,
+              "video": 45.076753527616155,
+              "voip": 690.2093885485879,
+              "bulk": 44.99238848765492,
+              "chat": 56.89148887359485,
+              "interactive": 559.71903613237
+            },
+            "wire_bytes_vs_pad16_pct": 47.9296953685598,
+            "wire_bytes_vs_ip_pct": 53.721086766097216,
+            "datagrams_seen_vs_real_packets": 1.0,
+            "added_latency_ms_median": 0.0,
+            "added_latency_ms_p95": 0.0,
+            "real_packets_not_sent_within_window_pct": 0.0
+          }
+        },
+        "constant-rate cover 50/200 pps (simulated)": {
+          "classifiers": {
+            "kNN (k=5)": {
+              "cross_environment": {
+                "accuracy": 0.16666666666666666,
+                "macro": {
+                  "precision": 0.027777777777777776,
+                  "recall": 0.16666666666666666,
+                  "f1": 0.047619047619047616,
+                  "fpr": 0.16666666666666666
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "video": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "voip": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "bulk": {
+                    "precision": 0.16666666666666666,
+                    "recall": 1.0,
+                    "f1": 0.2857142857142857,
+                    "fpr": 1.0
+                  },
+                  "chat": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "interactive": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "bulk": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "interactive": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.047619047619047616,
+                "train B -> test A": 0.047619047619047616
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.18,
+                "macro": {
+                  "precision": 0.03,
+                  "recall": 0.16666666666666666,
+                  "f1": 0.05084745762711865,
+                  "fpr": 0.16666666666666666
+                }
+              }
+            },
+            "nearest centroid": {
+              "cross_environment": {
+                "accuracy": 0.16666666666666666,
+                "macro": {
+                  "precision": 0.027777777777777776,
+                  "recall": 0.16666666666666666,
+                  "f1": 0.047619047619047616,
+                  "fpr": 0.16666666666666666
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.16666666666666666,
+                    "recall": 1.0,
+                    "f1": 0.2857142857142857,
+                    "fpr": 1.0
+                  },
+                  "video": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "voip": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "bulk": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "chat": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "interactive": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "bulk": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "interactive": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.047619047619047616,
+                "train B -> test A": 0.047619047619047616
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.12,
+                "macro": {
+                  "precision": 0.02,
+                  "recall": 0.16666666666666666,
+                  "f1": 0.035714285714285705,
+                  "fpr": 0.16666666666666666
+                }
+              }
+            }
+          },
+          "knn_cross_env_f1_feature_ablation": {
+            "size features only": 0.047619047619047616,
+            "timing/volume/order features only": 0.047619047619047616
+          },
+          "cost": {
+            "wire_bytes_vs_pad16_pct_by_class": {
+              "web": 68.96035552740456,
+              "video": -60.65317802045115,
+              "voip": 3966.371864436097,
+              "bulk": -79.32189599617257,
+              "chat": 2011.3860782045463,
+              "interactive": 12075.457459953781
+            },
+            "wire_bytes_vs_pad16_pct": -25.46173566386859,
+            "wire_bytes_vs_ip_pct": -22.543590920934243,
+            "datagrams_seen_vs_real_packets": 0.5168075985577271,
+            "added_latency_ms_median": 1178.1399776221574,
+            "added_latency_ms_p95": 3762.0586879963375,
+            "real_packets_not_sent_within_window_pct": 75.49587592764969
+          }
+        },
+        "constant-rate cover 400/1600 pps (simulated)": {
+          "classifiers": {
+            "kNN (k=5)": {
+              "cross_environment": {
+                "accuracy": 0.16666666666666666,
+                "macro": {
+                  "precision": 0.027777777777777776,
+                  "recall": 0.16666666666666666,
+                  "f1": 0.047619047619047616,
+                  "fpr": 0.16666666666666666
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "video": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "voip": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "bulk": {
+                    "precision": 0.16666666666666666,
+                    "recall": 1.0,
+                    "f1": 0.2857142857142857,
+                    "fpr": 1.0
+                  },
+                  "chat": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "interactive": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "bulk": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "interactive": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.047619047619047616,
+                "train B -> test A": 0.047619047619047616
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.18,
+                "macro": {
+                  "precision": 0.03,
+                  "recall": 0.16666666666666666,
+                  "f1": 0.05084745762711865,
+                  "fpr": 0.16666666666666666
+                }
+              }
+            },
+            "nearest centroid": {
+              "cross_environment": {
+                "accuracy": 0.16666666666666666,
+                "macro": {
+                  "precision": 0.027777777777777776,
+                  "recall": 0.16666666666666666,
+                  "f1": 0.047619047619047616,
+                  "fpr": 0.16666666666666666
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.16666666666666666,
+                    "recall": 1.0,
+                    "f1": 0.2857142857142857,
+                    "fpr": 1.0
+                  },
+                  "video": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "voip": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "bulk": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "chat": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "interactive": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "bulk": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "interactive": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.047619047619047616,
+                "train B -> test A": 0.047619047619047616
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.12,
+                "macro": {
+                  "precision": 0.02,
+                  "recall": 0.16666666666666666,
+                  "f1": 0.035714285714285705,
+                  "fpr": 0.16666666666666666
+                }
+              }
+            }
+          },
+          "knn_cross_env_f1_feature_ablation": {
+            "size features only": 0.047619047619047616,
+            "timing/volume/order features only": 0.047619047619047616
+          },
+          "cost": {
+            "wire_bytes_vs_pad16_pct_by_class": {
+              "web": 1249.5236064489181,
+              "video": 214.27174105070966,
+              "voip": 32379.008501885757,
+              "bulk": 65.16057511044282,
+              "chat": 16764.106055946853,
+              "interactive": 97148.06277918357
+            },
+            "wire_bytes_vs_pad16_pct": 495.35354901063425,
+            "wire_bytes_vs_ip_pct": 518.6614143695349,
+            "datagrams_seen_vs_real_packets": 4.127856218512197,
+            "added_latency_ms_median": 68.65112397427664,
+            "added_latency_ms_p95": 1905.0842135877092,
+            "real_packets_not_sent_within_window_pct": 19.33081946889626
+          }
+        }
+      },
+      "elapsed_s": 22.89907433999997
+    },
+    {
+      "defences": {
+        "none (reference)": {
+          "classifiers": {
+            "kNN (k=5)": {
+              "cross_environment": {
+                "accuracy": 0.7616666666666667,
+                "macro": {
+                  "precision": 0.6796303430152736,
+                  "recall": 0.7616666666666667,
+                  "f1": 0.7074400802888499,
+                  "fpr": 0.04766666666666666
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.518324607329843,
+                    "recall": 0.99,
+                    "f1": 0.6804123711340206,
+                    "fpr": 0.184
+                  },
+                  "video": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "voip": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "fpr": 0.0
+                  },
+                  "bulk": {
+                    "precision": 0.5811965811965812,
+                    "recall": 0.68,
+                    "f1": 0.6267281105990784,
+                    "fpr": 0.098
+                  },
+                  "chat": {
+                    "precision": 0.9782608695652174,
+                    "recall": 0.9,
+                    "f1": 0.9375,
+                    "fpr": 0.004
+                  },
+                  "interactive": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "fpr": 0.0
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 99,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 1,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 50,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 49,
+                    "chat": 1,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 100,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "bulk": {
+                    "web": 32,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 68,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 10,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 90,
+                    "interactive": 0
+                  },
+                  "interactive": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 100
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.7735720143931751,
+                "train B -> test A": 0.6565223311546841
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.96,
+                "macro": {
+                  "precision": 0.967741935483871,
+                  "recall": 0.9642857142857143,
+                  "f1": 0.9621428571428572,
+                  "fpr": 0.008
+                }
+              }
+            },
+            "nearest centroid": {
+              "cross_environment": {
+                "accuracy": 0.8066666666666666,
+                "macro": {
+                  "precision": 0.8833278699133172,
+                  "recall": 0.8066666666666666,
+                  "f1": 0.8124645379457421,
+                  "fpr": 0.03866666666666666
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.49019607843137253,
+                    "recall": 1.0,
+                    "f1": 0.6578947368421052,
+                    "fpr": 0.208
+                  },
+                  "video": {
+                    "precision": 0.819672131147541,
+                    "recall": 0.5,
+                    "f1": 0.6211180124223602,
+                    "fpr": 0.022
+                  },
+                  "voip": {
+                    "precision": 1.0,
+                    "recall": 0.99,
+                    "f1": 0.9949748743718593,
+                    "fpr": 0.0
+                  },
+                  "bulk": {
+                    "precision": 1.0,
+                    "recall": 0.59,
+                    "f1": 0.7421383647798743,
+                    "fpr": 0.0
+                  },
+                  "chat": {
+                    "precision": 1.0,
+                    "recall": 0.76,
+                    "f1": 0.8636363636363636,
+                    "fpr": 0.0
+                  },
+                  "interactive": {
+                    "precision": 0.9900990099009901,
+                    "recall": 1.0,
+                    "f1": 0.9950248756218906,
+                    "fpr": 0.002
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 50,
+                    "video": 50,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 99,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 1
+                  },
+                  "bulk": {
+                    "web": 30,
+                    "video": 11,
+                    "voip": 0,
+                    "bulk": 59,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 24,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 76,
+                    "interactive": 0
+                  },
+                  "interactive": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 100
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.9598554797270173,
+                "train B -> test A": 0.6211791285444992
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.82,
+                "macro": {
+                  "precision": 0.8386752136752137,
+                  "recall": 0.8271428571428571,
+                  "f1": 0.806985029192898,
+                  "fpr": 0.035480510752688176
+                }
+              }
+            }
+          },
+          "knn_cross_env_f1_feature_ablation": {
+            "size features only": 0.9882725876913003,
+            "timing/volume/order features only": 0.5151063676346408
+          },
+          "cost": {
+            "wire_bytes_vs_pad16_pct_by_class": {
+              "web": -0.46548421960805886,
+              "video": -0.412454425812514,
+              "voip": -4.193786320965575,
+              "bulk": -0.4048692492194417,
+              "chat": -0.5181153708034403,
+              "interactive": -3.6347030873188357
+            },
+            "wire_bytes_vs_pad16_pct": -0.4282170169460975,
+            "wire_bytes_vs_ip_pct": 3.47202862974898,
+            "datagrams_seen_vs_real_packets": 1.0,
+            "added_latency_ms_median": 0.0,
+            "added_latency_ms_p95": 0.0,
+            "real_packets_not_sent_within_window_pct": 0.0
+          }
+        },
+        "pad16 (production)": {
+          "classifiers": {
+            "kNN (k=5)": {
+              "cross_environment": {
+                "accuracy": 0.7683333333333333,
+                "macro": {
+                  "precision": 0.684000009021322,
+                  "recall": 0.7683333333333334,
+                  "f1": 0.7129905581625612,
+                  "fpr": 0.04633333333333333
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.5291005291005291,
+                    "recall": 1.0,
+                    "f1": 0.6920415224913494,
+                    "fpr": 0.178
+                  },
+                  "video": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "voip": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "fpr": 0.0
+                  },
+                  "bulk": {
+                    "precision": 0.5966386554621849,
+                    "recall": 0.71,
+                    "f1": 0.6484018264840181,
+                    "fpr": 0.096
+                  },
+                  "chat": {
+                    "precision": 0.9782608695652174,
+                    "recall": 0.9,
+                    "f1": 0.9375,
+                    "fpr": 0.004
+                  },
+                  "interactive": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "fpr": 0.0
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 50,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 48,
+                    "chat": 2,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 100,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "bulk": {
+                    "web": 29,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 71,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 10,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 90,
+                    "interactive": 0
+                  },
+                  "interactive": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 100
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.7760113054230701,
+                "train B -> test A": 0.668256452294011
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.96,
+                "macro": {
+                  "precision": 0.967741935483871,
+                  "recall": 0.9642857142857143,
+                  "f1": 0.9621428571428572,
+                  "fpr": 0.008
+                }
+              }
+            },
+            "nearest centroid": {
+              "cross_environment": {
+                "accuracy": 0.8166666666666667,
+                "macro": {
+                  "precision": 0.8858036076831727,
+                  "recall": 0.8166666666666668,
+                  "f1": 0.8222956422547628,
+                  "fpr": 0.03666666666666667
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.5050505050505051,
+                    "recall": 1.0,
+                    "f1": 0.6711409395973155,
+                    "fpr": 0.196
+                  },
+                  "video": {
+                    "precision": 0.819672131147541,
+                    "recall": 0.5,
+                    "f1": 0.6211180124223602,
+                    "fpr": 0.022
+                  },
+                  "voip": {
+                    "precision": 1.0,
+                    "recall": 0.99,
+                    "f1": 0.9949748743718593,
+                    "fpr": 0.0
+                  },
+                  "bulk": {
+                    "precision": 1.0,
+                    "recall": 0.65,
+                    "f1": 0.787878787878788,
+                    "fpr": 0.0
+                  },
+                  "chat": {
+                    "precision": 1.0,
+                    "recall": 0.76,
+                    "f1": 0.8636363636363636,
+                    "fpr": 0.0
+                  },
+                  "interactive": {
+                    "precision": 0.9900990099009901,
+                    "recall": 1.0,
+                    "f1": 0.9950248756218906,
+                    "fpr": 0.002
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 50,
+                    "video": 50,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 99,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 1
+                  },
+                  "bulk": {
+                    "web": 26,
+                    "video": 9,
+                    "voip": 0,
+                    "bulk": 65,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 22,
+                    "video": 2,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 76,
+                    "interactive": 0
+                  },
+                  "interactive": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 100
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.9796834718611941,
+                "train B -> test A": 0.6229146972903772
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.8933333333333333,
+                "macro": {
+                  "precision": 0.9040684936124314,
+                  "recall": 0.8997619047619048,
+                  "f1": 0.8916852183010353,
+                  "fpr": 0.021084341397849465
+                }
+              }
+            }
+          },
+          "knn_cross_env_f1_feature_ablation": {
+            "size features only": 0.9899474641341685,
+            "timing/volume/order features only": 0.5154601978643355
+          },
+          "cost": {
+            "wire_bytes_vs_pad16_pct_by_class": {
+              "web": 0.0,
+              "video": 0.0,
+              "voip": 0.0,
+              "bulk": 0.0,
+              "chat": 0.0,
+              "interactive": 0.0
+            },
+            "wire_bytes_vs_pad16_pct": 0.0,
+            "wire_bytes_vs_ip_pct": 3.917018988561094,
+            "datagrams_seen_vs_real_packets": 1.0,
+            "added_latency_ms_median": 0.0,
+            "added_latency_ms_p95": 0.0,
+            "real_packets_not_sent_within_window_pct": 0.0
+          }
+        },
+        "bucket 128/256/512/1024/MTU": {
+          "classifiers": {
+            "kNN (k=5)": {
+              "cross_environment": {
+                "accuracy": 0.7833333333333333,
+                "macro": {
+                  "precision": 0.856065523379784,
+                  "recall": 0.7833333333333333,
+                  "f1": 0.7525996154009486,
+                  "fpr": 0.043333333333333335
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.5154639175257731,
+                    "recall": 1.0,
+                    "f1": 0.6802721088435374,
+                    "fpr": 0.188
+                  },
+                  "video": {
+                    "precision": 1.0,
+                    "recall": 0.14,
+                    "f1": 0.24561403508771928,
+                    "fpr": 0.0
+                  },
+                  "voip": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "fpr": 0.0
+                  },
+                  "bulk": {
+                    "precision": 0.7127659574468085,
+                    "recall": 0.67,
+                    "f1": 0.6907216494845361,
+                    "fpr": 0.054
+                  },
+                  "chat": {
+                    "precision": 0.9081632653061225,
+                    "recall": 0.89,
+                    "f1": 0.8989898989898989,
+                    "fpr": 0.018
+                  },
+                  "interactive": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "fpr": 0.0
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 50,
+                    "video": 14,
+                    "voip": 0,
+                    "bulk": 27,
+                    "chat": 9,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 100,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "bulk": {
+                    "web": 33,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 67,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 11,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 89,
+                    "interactive": 0
+                  },
+                  "interactive": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 100
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.85705546124395,
+                "train B -> test A": 0.6498885164124933
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.96,
+                "macro": {
+                  "precision": 0.967741935483871,
+                  "recall": 0.9642857142857143,
+                  "f1": 0.9621428571428572,
+                  "fpr": 0.008
+                }
+              }
+            },
+            "nearest centroid": {
+              "cross_environment": {
+                "accuracy": 0.8083333333333333,
+                "macro": {
+                  "precision": 0.8999964765780527,
+                  "recall": 0.8083333333333332,
+                  "f1": 0.8166394595410617,
+                  "fpr": 0.03833333333333334
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.47619047619047616,
+                    "recall": 1.0,
+                    "f1": 0.6451612903225806,
+                    "fpr": 0.22
+                  },
+                  "video": {
+                    "precision": 0.9433962264150944,
+                    "recall": 0.5,
+                    "f1": 0.6535947712418301,
+                    "fpr": 0.006
+                  },
+                  "voip": {
+                    "precision": 1.0,
+                    "recall": 0.99,
+                    "f1": 0.9949748743718593,
+                    "fpr": 0.0
+                  },
+                  "bulk": {
+                    "precision": 1.0,
+                    "recall": 0.62,
+                    "f1": 0.7654320987654321,
+                    "fpr": 0.0
+                  },
+                  "chat": {
+                    "precision": 1.0,
+                    "recall": 0.74,
+                    "f1": 0.8505747126436781,
+                    "fpr": 0.0
+                  },
+                  "interactive": {
+                    "precision": 0.9803921568627451,
+                    "recall": 1.0,
+                    "f1": 0.99009900990099,
+                    "fpr": 0.004
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 50,
+                    "video": 50,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 99,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 1
+                  },
+                  "bulk": {
+                    "web": 35,
+                    "video": 3,
+                    "voip": 0,
+                    "bulk": 62,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 25,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 74,
+                    "interactive": 1
+                  },
+                  "interactive": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 100
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.976371069851964,
+                "train B -> test A": 0.6037871585317222
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.94,
+                "macro": {
+                  "precision": 0.950129773822766,
+                  "recall": 0.9464285714285715,
+                  "f1": 0.9411195443296974,
+                  "fpr": 0.012053763440860213
+                }
+              }
+            }
+          },
+          "knn_cross_env_f1_feature_ablation": {
+            "size features only": 0.9812842879332454,
+            "timing/volume/order features only": 0.5144109768156665
+          },
+          "cost": {
+            "wire_bytes_vs_pad16_pct_by_class": {
+              "web": 3.84215221475952,
+              "video": 2.2308845159494384,
+              "voip": 35.64810013410818,
+              "bulk": 2.1593026625036593,
+              "chat": 3.6695395503236306,
+              "interactive": 25.235787111100507
+            },
+            "wire_bytes_vs_pad16_pct": 2.456195337281164,
+            "wire_bytes_vs_ip_pct": 6.4694239635997075,
+            "datagrams_seen_vs_real_packets": 1.0,
+            "added_latency_ms_median": 0.0,
+            "added_latency_ms_p95": 0.0,
+            "real_packets_not_sent_within_window_pct": 0.0
+          }
+        },
+        "pad to MTU": {
+          "classifiers": {
+            "kNN (k=5)": {
+              "cross_environment": {
+                "accuracy": 0.5883333333333334,
+                "macro": {
+                  "precision": 0.47141578314819393,
+                  "recall": 0.5883333333333333,
+                  "f1": 0.48869769966768634,
+                  "fpr": 0.08233333333333333
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.4520547945205479,
+                    "recall": 0.99,
+                    "f1": 0.6206896551724137,
+                    "fpr": 0.24
+                  },
+                  "video": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "voip": {
+                    "precision": 0.4418604651162791,
+                    "recall": 0.95,
+                    "f1": 0.6031746031746031,
+                    "fpr": 0.24
+                  },
+                  "bulk": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "chat": {
+                    "precision": 1.0,
+                    "recall": 0.59,
+                    "f1": 0.7421383647798743,
+                    "fpr": 0.0
+                  },
+                  "interactive": {
+                    "precision": 0.9345794392523364,
+                    "recall": 1.0,
+                    "f1": 0.966183574879227,
+                    "fpr": 0.014
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 99,
+                    "video": 0,
+                    "voip": 1,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 51,
+                    "video": 0,
+                    "voip": 49,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 95,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 5
+                  },
+                  "bulk": {
+                    "web": 50,
+                    "video": 0,
+                    "voip": 50,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 19,
+                    "video": 0,
+                    "voip": 20,
+                    "bulk": 0,
+                    "chat": 59,
+                    "interactive": 2
+                  },
+                  "interactive": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 100
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.5166423586607073,
+                "train B -> test A": 0.5269998424479772
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.9733333333333334,
+                "macro": {
+                  "precision": 0.9751828631138976,
+                  "recall": 0.9761904761904762,
+                  "f1": 0.97421260909633,
+                  "fpr": 0.0053242477285988165
+                }
+              }
+            },
+            "nearest centroid": {
+              "cross_environment": {
+                "accuracy": 0.6,
+                "macro": {
+                  "precision": 0.5492749509134727,
+                  "recall": 0.6,
+                  "f1": 0.5417842850880866,
+                  "fpr": 0.08
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.4342105263157895,
+                    "recall": 0.99,
+                    "f1": 0.6036585365853658,
+                    "fpr": 0.258
+                  },
+                  "video": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "voip": {
+                    "precision": 0.6428571428571429,
+                    "recall": 0.99,
+                    "f1": 0.7795275590551181,
+                    "fpr": 0.11
+                  },
+                  "bulk": {
+                    "precision": 0.4084507042253521,
+                    "recall": 0.29,
+                    "f1": 0.3391812865497076,
+                    "fpr": 0.084
+                  },
+                  "chat": {
+                    "precision": 0.9076923076923077,
+                    "recall": 0.59,
+                    "f1": 0.7151515151515151,
+                    "fpr": 0.012
+                  },
+                  "interactive": {
+                    "precision": 0.9024390243902439,
+                    "recall": 0.74,
+                    "f1": 0.8131868131868132,
+                    "fpr": 0.016
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 99,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 1,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 59,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 41,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 99,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 1
+                  },
+                  "bulk": {
+                    "web": 50,
+                    "video": 0,
+                    "voip": 21,
+                    "bulk": 29,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 20,
+                    "video": 0,
+                    "voip": 14,
+                    "bulk": 0,
+                    "chat": 59,
+                    "interactive": 7
+                  },
+                  "interactive": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 20,
+                    "bulk": 0,
+                    "chat": 6,
+                    "interactive": 74
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.6064612199651781,
+                "train B -> test A": 0.470029386390987
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.8733333333333333,
+                "macro": {
+                  "precision": 0.9044734389561976,
+                  "recall": 0.8869047619047619,
+                  "f1": 0.8757142857142858,
+                  "fpr": 0.025120863549220638
+                }
+              }
+            }
+          },
+          "knn_cross_env_f1_feature_ablation": {
+            "size features only": 0.047619047619047616,
+            "timing/volume/order features only": 0.48869769966768634
+          },
+          "cost": {
+            "wire_bytes_vs_pad16_pct_by_class": {
+              "web": 49.22380647112177,
+              "video": 45.053287116926285,
+              "voip": 687.7884666964685,
+              "bulk": 44.99326198784512,
+              "chat": 55.62861847579508,
+              "interactive": 526.7060905369445
+            },
+            "wire_bytes_vs_pad16_pct": 47.96667773941179,
+            "wire_bytes_vs_ip_pct": 53.76256060320757,
+            "datagrams_seen_vs_real_packets": 1.0,
+            "added_latency_ms_median": 0.0,
+            "added_latency_ms_p95": 0.0,
+            "real_packets_not_sent_within_window_pct": 0.0
+          }
+        },
+        "constant-rate cover 50/200 pps (simulated)": {
+          "classifiers": {
+            "kNN (k=5)": {
+              "cross_environment": {
+                "accuracy": 0.16666666666666666,
+                "macro": {
+                  "precision": 0.027777777777777776,
+                  "recall": 0.16666666666666666,
+                  "f1": 0.047619047619047616,
+                  "fpr": 0.16666666666666666
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "video": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "voip": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "bulk": {
+                    "precision": 0.16666666666666666,
+                    "recall": 1.0,
+                    "f1": 0.2857142857142857,
+                    "fpr": 1.0
+                  },
+                  "chat": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "interactive": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "bulk": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "interactive": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.047619047619047616,
+                "train B -> test A": 0.047619047619047616
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.16666666666666666,
+                "macro": {
+                  "precision": 0.027777777777777776,
+                  "recall": 0.16666666666666666,
+                  "f1": 0.047619047619047616,
+                  "fpr": 0.16666666666666666
+                }
+              }
+            },
+            "nearest centroid": {
+              "cross_environment": {
+                "accuracy": 0.16666666666666666,
+                "macro": {
+                  "precision": 0.027777777777777776,
+                  "recall": 0.16666666666666666,
+                  "f1": 0.047619047619047616,
+                  "fpr": 0.16666666666666666
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.16666666666666666,
+                    "recall": 1.0,
+                    "f1": 0.2857142857142857,
+                    "fpr": 1.0
+                  },
+                  "video": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "voip": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "bulk": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "chat": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "interactive": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "bulk": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "interactive": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.047619047619047616,
+                "train B -> test A": 0.047619047619047616
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.17333333333333334,
+                "macro": {
+                  "precision": 0.02888888888888889,
+                  "recall": 0.16666666666666666,
+                  "f1": 0.04924242424242425,
+                  "fpr": 0.16666666666666666
+                }
+              }
+            }
+          },
+          "knn_cross_env_f1_feature_ablation": {
+            "size features only": 0.047619047619047616,
+            "timing/volume/order features only": 0.047619047619047616
+          },
+          "cost": {
+            "wire_bytes_vs_pad16_pct_by_class": {
+              "web": 53.14666971331883,
+              "video": -60.250540156386265,
+              "voip": 3767.375949932946,
+              "bulk": -79.65038284561983,
+              "chat": 1794.377731648142,
+              "interactive": 11376.060478233301
+            },
+            "wire_bytes_vs_pad16_pct": -26.562228302250055,
+            "wire_bytes_vs_ip_pct": -23.685656840073033,
+            "datagrams_seen_vs_real_packets": 0.5089379172975884,
+            "added_latency_ms_median": 1172.6310839713099,
+            "added_latency_ms_p95": 3762.5750123449643,
+            "real_packets_not_sent_within_window_pct": 75.3228117600431
+          }
+        },
+        "constant-rate cover 400/1600 pps (simulated)": {
+          "classifiers": {
+            "kNN (k=5)": {
+              "cross_environment": {
+                "accuracy": 0.16666666666666666,
+                "macro": {
+                  "precision": 0.027777777777777776,
+                  "recall": 0.16666666666666666,
+                  "f1": 0.047619047619047616,
+                  "fpr": 0.16666666666666666
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "video": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "voip": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "bulk": {
+                    "precision": 0.16666666666666666,
+                    "recall": 1.0,
+                    "f1": 0.2857142857142857,
+                    "fpr": 1.0
+                  },
+                  "chat": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "interactive": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "bulk": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "interactive": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.047619047619047616,
+                "train B -> test A": 0.047619047619047616
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.16666666666666666,
+                "macro": {
+                  "precision": 0.027777777777777776,
+                  "recall": 0.16666666666666666,
+                  "f1": 0.047619047619047616,
+                  "fpr": 0.16666666666666666
+                }
+              }
+            },
+            "nearest centroid": {
+              "cross_environment": {
+                "accuracy": 0.16666666666666666,
+                "macro": {
+                  "precision": 0.027777777777777776,
+                  "recall": 0.16666666666666666,
+                  "f1": 0.047619047619047616,
+                  "fpr": 0.16666666666666666
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.16666666666666666,
+                    "recall": 1.0,
+                    "f1": 0.2857142857142857,
+                    "fpr": 1.0
+                  },
+                  "video": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "voip": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "bulk": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "chat": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "interactive": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "bulk": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "interactive": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.047619047619047616,
+                "train B -> test A": 0.047619047619047616
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.17333333333333334,
+                "macro": {
+                  "precision": 0.02888888888888889,
+                  "recall": 0.16666666666666666,
+                  "f1": 0.04924242424242425,
+                  "fpr": 0.16666666666666666
+                }
+              }
+            }
+          },
+          "knn_cross_env_f1_feature_ablation": {
+            "size features only": 0.047619047619047616,
+            "timing/volume/order features only": 0.047619047619047616
+          },
+          "cost": {
+            "wire_bytes_vs_pad16_pct_by_class": {
+              "web": 1123.2162117677224,
+              "video": 217.48769843141963,
+              "voip": 30789.584264640143,
+              "bulk": 62.53687822987357,
+              "chat": 15030.812553100173,
+              "interactive": 91561.82490601679
+            },
+            "wire_bytes_vs_pad16_pct": 486.563671707268,
+            "wire_bytes_vs_ip_pct": 509.5394821080428,
+            "datagrams_seen_vs_real_packets": 4.064999339437607,
+            "added_latency_ms_median": 76.39448680224298,
+            "added_latency_ms_p95": 1923.5332910343482,
+            "real_packets_not_sent_within_window_pct": 19.672903053153252
+          }
+        }
+      },
+      "elapsed_s": 23.309582026000044
+    },
+    {
+      "defences": {
+        "none (reference)": {
+          "classifiers": {
+            "kNN (k=5)": {
+              "cross_environment": {
+                "accuracy": 0.76,
+                "macro": {
+                  "precision": 0.6819558506610752,
+                  "recall": 0.7600000000000001,
+                  "f1": 0.7067159221031115,
+                  "fpr": 0.04800000000000001
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.5154639175257731,
+                    "recall": 1.0,
+                    "f1": 0.6802721088435374,
+                    "fpr": 0.188
+                  },
+                  "video": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "voip": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "fpr": 0.0
+                  },
+                  "bulk": {
+                    "precision": 0.576271186440678,
+                    "recall": 0.68,
+                    "f1": 0.6238532110091743,
+                    "fpr": 0.1
+                  },
+                  "chat": {
+                    "precision": 1.0,
+                    "recall": 0.88,
+                    "f1": 0.9361702127659575,
+                    "fpr": 0.0
+                  },
+                  "interactive": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "fpr": 0.0
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 50,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 50,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 100,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "bulk": {
+                    "web": 32,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 68,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 12,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 88,
+                    "interactive": 0
+                  },
+                  "interactive": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 100
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.7744441110777744,
+                "train B -> test A": 0.6539918290189686
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.9933333333333333,
+                "macro": {
+                  "precision": 0.9940476190476191,
+                  "recall": 0.9927536231884058,
+                  "f1": 0.9932659932659932,
+                  "fpr": 0.0013550135501355016
+                }
+              }
+            },
+            "nearest centroid": {
+              "cross_environment": {
+                "accuracy": 0.7633333333333333,
+                "macro": {
+                  "precision": 0.8275993531636981,
+                  "recall": 0.7633333333333333,
+                  "f1": 0.7555913110926046,
+                  "fpr": 0.04733333333333334
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.4694835680751174,
+                    "recall": 1.0,
+                    "f1": 0.6389776357827476,
+                    "fpr": 0.226
+                  },
+                  "video": {
+                    "precision": 0.7837837837837838,
+                    "recall": 0.29,
+                    "f1": 0.4233576642335766,
+                    "fpr": 0.016
+                  },
+                  "voip": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "fpr": 0.0
+                  },
+                  "bulk": {
+                    "precision": 0.7123287671232876,
+                    "recall": 0.52,
+                    "f1": 0.6011560693641619,
+                    "fpr": 0.042
+                  },
+                  "chat": {
+                    "precision": 1.0,
+                    "recall": 0.77,
+                    "f1": 0.8700564971751412,
+                    "fpr": 0.0
+                  },
+                  "interactive": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "fpr": 0.0
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 50,
+                    "video": 29,
+                    "voip": 0,
+                    "bulk": 21,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 100,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "bulk": {
+                    "web": 41,
+                    "video": 7,
+                    "voip": 0,
+                    "bulk": 52,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 22,
+                    "video": 1,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 77,
+                    "interactive": 0
+                  },
+                  "interactive": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 100
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.9134422334554726,
+                "train B -> test A": 0.5530909419798309
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.9466666666666667,
+                "macro": {
+                  "precision": 0.953968253968254,
+                  "recall": 0.9465811965811967,
+                  "f1": 0.9462343212343213,
+                  "fpr": 0.010667349377026797
+                }
+              }
+            }
+          },
+          "knn_cross_env_f1_feature_ablation": {
+            "size features only": 0.9865869622457373,
+            "timing/volume/order features only": 0.5119989526083221
+          },
+          "cost": {
+            "wire_bytes_vs_pad16_pct_by_class": {
+              "web": -0.46922401917194323,
+              "video": -0.4122412771348283,
+              "voip": -4.2277731166735055,
+              "bulk": -0.40502556187337335,
+              "chat": -0.5285682588273333,
+              "interactive": -3.883842852173336
+            },
+            "wire_bytes_vs_pad16_pct": -0.42783013456625385,
+            "wire_bytes_vs_ip_pct": 3.470249719321661,
+            "datagrams_seen_vs_real_packets": 1.0,
+            "added_latency_ms_median": 0.0,
+            "added_latency_ms_p95": 0.0,
+            "real_packets_not_sent_within_window_pct": 0.0
+          }
+        },
+        "pad16 (production)": {
+          "classifiers": {
+            "kNN (k=5)": {
+              "cross_environment": {
+                "accuracy": 0.77,
+                "macro": {
+                  "precision": 0.6875684714293951,
+                  "recall": 0.77,
+                  "f1": 0.7151586510704598,
+                  "fpr": 0.046000000000000006
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.5319148936170213,
+                    "recall": 1.0,
+                    "f1": 0.6944444444444444,
+                    "fpr": 0.176
+                  },
+                  "video": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "voip": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "fpr": 0.0
+                  },
+                  "bulk": {
+                    "precision": 0.5934959349593496,
+                    "recall": 0.73,
+                    "f1": 0.6547085201793722,
+                    "fpr": 0.1
+                  },
+                  "chat": {
+                    "precision": 1.0,
+                    "recall": 0.89,
+                    "f1": 0.9417989417989417,
+                    "fpr": 0.0
+                  },
+                  "interactive": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "fpr": 0.0
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 50,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 50,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 100,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "bulk": {
+                    "web": 27,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 73,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 11,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 89,
+                    "interactive": 0
+                  },
+                  "interactive": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 100
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.7777777777777778,
+                "train B -> test A": 0.6730760623834023
+              },
+              "same_environment_random_split": {
+                "accuracy": 1.0,
+                "macro": {
+                  "precision": 1.0,
+                  "recall": 1.0,
+                  "f1": 1.0,
+                  "fpr": 0.0
+                }
+              }
+            },
+            "nearest centroid": {
+              "cross_environment": {
+                "accuracy": 0.7816666666666666,
+                "macro": {
+                  "precision": 0.841113039361122,
+                  "recall": 0.7816666666666666,
+                  "f1": 0.7784769215350501,
+                  "fpr": 0.043666666666666666
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.4878048780487805,
+                    "recall": 1.0,
+                    "f1": 0.6557377049180327,
+                    "fpr": 0.21
+                  },
+                  "video": {
+                    "precision": 0.7659574468085106,
+                    "recall": 0.36,
+                    "f1": 0.4897959183673468,
+                    "fpr": 0.022
+                  },
+                  "voip": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "fpr": 0.0
+                  },
+                  "bulk": {
+                    "precision": 0.8028169014084507,
+                    "recall": 0.57,
+                    "f1": 0.6666666666666666,
+                    "fpr": 0.028
+                  },
+                  "chat": {
+                    "precision": 1.0,
+                    "recall": 0.76,
+                    "f1": 0.8636363636363636,
+                    "fpr": 0.0
+                  },
+                  "interactive": {
+                    "precision": 0.9900990099009901,
+                    "recall": 1.0,
+                    "f1": 0.9950248756218906,
+                    "fpr": 0.002
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 50,
+                    "video": 36,
+                    "voip": 0,
+                    "bulk": 14,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 100,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "bulk": {
+                    "web": 33,
+                    "video": 10,
+                    "voip": 0,
+                    "bulk": 57,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 22,
+                    "video": 1,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 76,
+                    "interactive": 1
+                  },
+                  "interactive": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 100
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.9355200677856801,
+                "train B -> test A": 0.5843492731339411
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.9733333333333334,
+                "macro": {
+                  "precision": 0.9777777777777779,
+                  "recall": 0.9722222222222222,
+                  "f1": 0.972943722943723,
+                  "fpr": 0.005376344086021505
+                }
+              }
+            }
+          },
+          "knn_cross_env_f1_feature_ablation": {
+            "size features only": 0.9899632769930893,
+            "timing/volume/order features only": 0.5154404532278375
+          },
+          "cost": {
+            "wire_bytes_vs_pad16_pct_by_class": {
+              "web": 0.0,
+              "video": 0.0,
+              "voip": 0.0,
+              "bulk": 0.0,
+              "chat": 0.0,
+              "interactive": 0.0
+            },
+            "wire_bytes_vs_pad16_pct": 0.0,
+            "wire_bytes_vs_ip_pct": 3.914828670657622,
+            "datagrams_seen_vs_real_packets": 1.0,
+            "added_latency_ms_median": 0.0,
+            "added_latency_ms_p95": 0.0,
+            "real_packets_not_sent_within_window_pct": 0.0
+          }
+        },
+        "bucket 128/256/512/1024/MTU": {
+          "classifiers": {
+            "kNN (k=5)": {
+              "cross_environment": {
+                "accuracy": 0.77,
+                "macro": {
+                  "precision": 0.8509653770927992,
+                  "recall": 0.77,
+                  "f1": 0.7383850403750682,
+                  "fpr": 0.046000000000000006
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.5102040816326531,
+                    "recall": 1.0,
+                    "f1": 0.6756756756756758,
+                    "fpr": 0.192
+                  },
+                  "video": {
+                    "precision": 1.0,
+                    "recall": 0.12,
+                    "f1": 0.21428571428571425,
+                    "fpr": 0.0
+                  },
+                  "voip": {
+                    "precision": 0.9900990099009901,
+                    "recall": 1.0,
+                    "f1": 0.9950248756218906,
+                    "fpr": 0.002
+                  },
+                  "bulk": {
+                    "precision": 0.6346153846153846,
+                    "recall": 0.66,
+                    "f1": 0.6470588235294118,
+                    "fpr": 0.076
+                  },
+                  "chat": {
+                    "precision": 1.0,
+                    "recall": 0.84,
+                    "f1": 0.9130434782608696,
+                    "fpr": 0.0
+                  },
+                  "interactive": {
+                    "precision": 0.970873786407767,
+                    "recall": 1.0,
+                    "f1": 0.9852216748768473,
+                    "fpr": 0.006
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 50,
+                    "video": 12,
+                    "voip": 0,
+                    "bulk": 38,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 100,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "bulk": {
+                    "web": 34,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 66,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 12,
+                    "video": 0,
+                    "voip": 1,
+                    "bulk": 0,
+                    "chat": 84,
+                    "interactive": 3
+                  },
+                  "interactive": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 100
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.8350291137692246,
+                "train B -> test A": 0.6456789153418367
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.9933333333333333,
+                "macro": {
+                  "precision": 0.9938271604938271,
+                  "recall": 0.9930555555555555,
+                  "f1": 0.9933092466211696,
+                  "fpr": 0.0013440860215053762
+                }
+              }
+            },
+            "nearest centroid": {
+              "cross_environment": {
+                "accuracy": 0.79,
+                "macro": {
+                  "precision": 0.8925075652722999,
+                  "recall": 0.79,
+                  "f1": 0.7963848894943885,
+                  "fpr": 0.042
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.4608294930875576,
+                    "recall": 1.0,
+                    "f1": 0.6309148264984227,
+                    "fpr": 0.234
+                  },
+                  "video": {
+                    "precision": 1.0,
+                    "recall": 0.47,
+                    "f1": 0.6394557823129251,
+                    "fpr": 0.0
+                  },
+                  "voip": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "fpr": 0.0
+                  },
+                  "bulk": {
+                    "precision": 0.9508196721311475,
+                    "recall": 0.58,
+                    "f1": 0.7204968944099378,
+                    "fpr": 0.006
+                  },
+                  "chat": {
+                    "precision": 1.0,
+                    "recall": 0.69,
+                    "f1": 0.8165680473372781,
+                    "fpr": 0.0
+                  },
+                  "interactive": {
+                    "precision": 0.9433962264150944,
+                    "recall": 1.0,
+                    "f1": 0.970873786407767,
+                    "fpr": 0.012
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 50,
+                    "video": 47,
+                    "voip": 0,
+                    "bulk": 3,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 100,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "bulk": {
+                    "web": 42,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 58,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 25,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 69,
+                    "interactive": 6
+                  },
+                  "interactive": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 100
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.952021270755715,
+                "train B -> test A": 0.582926697028844
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.9666666666666667,
+                "macro": {
+                  "precision": 0.9718253968253968,
+                  "recall": 0.9652777777777778,
+                  "f1": 0.9656850901036947,
+                  "fpr": 0.006731357636157007
+                }
+              }
+            }
+          },
+          "knn_cross_env_f1_feature_ablation": {
+            "size features only": 0.9743060225697646,
+            "timing/volume/order features only": 0.5117056283615095
+          },
+          "cost": {
+            "wire_bytes_vs_pad16_pct_by_class": {
+              "web": 3.9127087203087108,
+              "video": 2.2246774319069518,
+              "voip": 36.02465076205921,
+              "bulk": 2.1601363299913023,
+              "chat": 3.907166254152239,
+              "interactive": 26.004497607393382
+            },
+            "wire_bytes_vs_pad16_pct": 2.4391872683696247,
+            "wire_bytes_vs_ip_pct": 6.449505941540412,
+            "datagrams_seen_vs_real_packets": 1.0,
+            "added_latency_ms_median": 0.0,
+            "added_latency_ms_p95": 0.0,
+            "real_packets_not_sent_within_window_pct": 0.0
+          }
+        },
+        "pad to MTU": {
+          "classifiers": {
+            "kNN (k=5)": {
+              "cross_environment": {
+                "accuracy": 0.6016666666666667,
+                "macro": {
+                  "precision": 0.4766403018830203,
+                  "recall": 0.6016666666666667,
+                  "f1": 0.5023585997074115,
+                  "fpr": 0.07966666666666666
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.44144144144144143,
+                    "recall": 0.98,
+                    "f1": 0.6086956521739131,
+                    "fpr": 0.248
+                  },
+                  "video": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "voip": {
+                    "precision": 0.46601941747572817,
+                    "recall": 0.96,
+                    "f1": 0.6274509803921569,
+                    "fpr": 0.22
+                  },
+                  "bulk": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "chat": {
+                    "precision": 1.0,
+                    "recall": 0.67,
+                    "f1": 0.8023952095808384,
+                    "fpr": 0.0
+                  },
+                  "interactive": {
+                    "precision": 0.9523809523809523,
+                    "recall": 1.0,
+                    "f1": 0.975609756097561,
+                    "fpr": 0.01
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 98,
+                    "video": 0,
+                    "voip": 2,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 53,
+                    "video": 0,
+                    "voip": 47,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 96,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 4
+                  },
+                  "bulk": {
+                    "web": 50,
+                    "video": 0,
+                    "voip": 50,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 21,
+                    "video": 0,
+                    "voip": 11,
+                    "bulk": 0,
+                    "chat": 67,
+                    "interactive": 1
+                  },
+                  "interactive": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 100
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.5401738102709598,
+                "train B -> test A": 0.5240819009836125
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.9666666666666667,
+                "macro": {
+                  "precision": 0.9714285714285714,
+                  "recall": 0.9646739130434782,
+                  "f1": 0.9663683619823971,
+                  "fpr": 0.0067532126934172565
+                }
+              }
+            },
+            "nearest centroid": {
+              "cross_environment": {
+                "accuracy": 0.605,
+                "macro": {
+                  "precision": 0.5556327412734735,
+                  "recall": 0.605,
+                  "f1": 0.550748373304068,
+                  "fpr": 0.079
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.4342105263157895,
+                    "recall": 0.99,
+                    "f1": 0.6036585365853658,
+                    "fpr": 0.258
+                  },
+                  "video": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "voip": {
+                    "precision": 0.6301369863013698,
+                    "recall": 0.92,
+                    "f1": 0.7479674796747968,
+                    "fpr": 0.108
+                  },
+                  "bulk": {
+                    "precision": 0.3698630136986301,
+                    "recall": 0.27,
+                    "f1": 0.3121387283236995,
+                    "fpr": 0.092
+                  },
+                  "chat": {
+                    "precision": 0.9710144927536232,
+                    "recall": 0.67,
+                    "f1": 0.7928994082840237,
+                    "fpr": 0.004
+                  },
+                  "interactive": {
+                    "precision": 0.9285714285714286,
+                    "recall": 0.78,
+                    "f1": 0.8478260869565217,
+                    "fpr": 0.012
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 99,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 1,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 58,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 42,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 92,
+                    "bulk": 3,
+                    "chat": 0,
+                    "interactive": 5
+                  },
+                  "bulk": {
+                    "web": 50,
+                    "video": 0,
+                    "voip": 23,
+                    "bulk": 27,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 21,
+                    "video": 0,
+                    "voip": 11,
+                    "bulk": 0,
+                    "chat": 67,
+                    "interactive": 1
+                  },
+                  "interactive": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 20,
+                    "bulk": 0,
+                    "chat": 2,
+                    "interactive": 78
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.6137364958526007,
+                "train B -> test A": 0.488542468686034
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.8066666666666666,
+                "macro": {
+                  "precision": 0.8486874236874238,
+                  "recall": 0.8040071844419671,
+                  "f1": 0.772044817927171,
+                  "fpr": 0.03890923777459892
+                }
+              }
+            }
+          },
+          "knn_cross_env_f1_feature_ablation": {
+            "size features only": 0.047619047619047616,
+            "timing/volume/order features only": 0.5023585997074115
+          },
+          "cost": {
+            "wire_bytes_vs_pad16_pct_by_class": {
+              "web": 49.39067680411171,
+              "video": 45.062949496427905,
+              "voip": 690.8512451418961,
+              "bulk": 44.98858352804136,
+              "chat": 57.628795029841264,
+              "interactive": 560.4024290366848
+            },
+            "wire_bytes_vs_pad16_pct": 47.913637517554484,
+            "wire_bytes_vs_ip_pct": 53.70420300690431,
+            "datagrams_seen_vs_real_packets": 1.0,
+            "added_latency_ms_median": 0.0,
+            "added_latency_ms_p95": 0.0,
+            "real_packets_not_sent_within_window_pct": 0.0
+          }
+        },
+        "constant-rate cover 50/200 pps (simulated)": {
+          "classifiers": {
+            "kNN (k=5)": {
+              "cross_environment": {
+                "accuracy": 0.16666666666666666,
+                "macro": {
+                  "precision": 0.027777777777777776,
+                  "recall": 0.16666666666666666,
+                  "f1": 0.047619047619047616,
+                  "fpr": 0.16666666666666666
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "video": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "voip": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "bulk": {
+                    "precision": 0.16666666666666666,
+                    "recall": 1.0,
+                    "f1": 0.2857142857142857,
+                    "fpr": 1.0
+                  },
+                  "chat": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "interactive": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "bulk": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "interactive": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.047619047619047616,
+                "train B -> test A": 0.047619047619047616
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.17333333333333334,
+                "macro": {
+                  "precision": 0.02888888888888889,
+                  "recall": 0.16666666666666666,
+                  "f1": 0.04924242424242425,
+                  "fpr": 0.16666666666666666
+                }
+              }
+            },
+            "nearest centroid": {
+              "cross_environment": {
+                "accuracy": 0.16666666666666666,
+                "macro": {
+                  "precision": 0.027777777777777776,
+                  "recall": 0.16666666666666666,
+                  "f1": 0.047619047619047616,
+                  "fpr": 0.16666666666666666
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.16666666666666666,
+                    "recall": 1.0,
+                    "f1": 0.2857142857142857,
+                    "fpr": 1.0
+                  },
+                  "video": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "voip": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "bulk": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "chat": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "interactive": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "bulk": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "interactive": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.047619047619047616,
+                "train B -> test A": 0.047619047619047616
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.17333333333333334,
+                "macro": {
+                  "precision": 0.02888888888888889,
+                  "recall": 0.16666666666666666,
+                  "f1": 0.04924242424242425,
+                  "fpr": 0.16666666666666666
+                }
+              }
+            }
+          },
+          "knn_cross_env_f1_feature_ablation": {
+            "size features only": 0.047619047619047616,
+            "timing/volume/order features only": 0.047619047619047616
+          },
+          "cost": {
+            "wire_bytes_vs_pad16_pct_by_class": {
+              "web": 83.76257402696314,
+              "video": -61.01491927421667,
+              "voip": 3968.636119085153,
+              "bulk": -79.16217236407665,
+              "chat": 2223.9381760217993,
+              "interactive": 11748.428987380952
+            },
+            "wire_bytes_vs_pad16_pct": -24.852312372816566,
+            "wire_bytes_vs_ip_pct": -21.910409152251354,
+            "datagrams_seen_vs_real_packets": 0.5210439467830461,
+            "added_latency_ms_median": 1186.3610143886406,
+            "added_latency_ms_p95": 3754.3382662746662,
+            "real_packets_not_sent_within_window_pct": 75.47715542743707
+          }
+        },
+        "constant-rate cover 400/1600 pps (simulated)": {
+          "classifiers": {
+            "kNN (k=5)": {
+              "cross_environment": {
+                "accuracy": 0.16666666666666666,
+                "macro": {
+                  "precision": 0.027777777777777776,
+                  "recall": 0.16666666666666666,
+                  "f1": 0.047619047619047616,
+                  "fpr": 0.16666666666666666
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "video": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "voip": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "bulk": {
+                    "precision": 0.16666666666666666,
+                    "recall": 1.0,
+                    "f1": 0.2857142857142857,
+                    "fpr": 1.0
+                  },
+                  "chat": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "interactive": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "bulk": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "interactive": {
+                    "web": 0,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 100,
+                    "chat": 0,
+                    "interactive": 0
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.047619047619047616,
+                "train B -> test A": 0.047619047619047616
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.17333333333333334,
+                "macro": {
+                  "precision": 0.02888888888888889,
+                  "recall": 0.16666666666666666,
+                  "f1": 0.04924242424242425,
+                  "fpr": 0.16666666666666666
+                }
+              }
+            },
+            "nearest centroid": {
+              "cross_environment": {
+                "accuracy": 0.16666666666666666,
+                "macro": {
+                  "precision": 0.027777777777777776,
+                  "recall": 0.16666666666666666,
+                  "f1": 0.047619047619047616,
+                  "fpr": 0.16666666666666666
+                },
+                "per_class": {
+                  "web": {
+                    "precision": 0.16666666666666666,
+                    "recall": 1.0,
+                    "f1": 0.2857142857142857,
+                    "fpr": 1.0
+                  },
+                  "video": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "voip": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "bulk": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "chat": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  },
+                  "interactive": {
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "fpr": 0.0
+                  }
+                },
+                "confusion": {
+                  "web": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "video": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "voip": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "bulk": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "chat": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  },
+                  "interactive": {
+                    "web": 100,
+                    "video": 0,
+                    "voip": 0,
+                    "bulk": 0,
+                    "chat": 0,
+                    "interactive": 0
+                  }
+                },
+                "n": 600
+              },
+              "cross_environment_f1_by_direction": {
+                "train A -> test B": 0.047619047619047616,
+                "train B -> test A": 0.047619047619047616
+              },
+              "same_environment_random_split": {
+                "accuracy": 0.17333333333333334,
+                "macro": {
+                  "precision": 0.02888888888888889,
+                  "recall": 0.16666666666666666,
+                  "f1": 0.04924242424242425,
+                  "fpr": 0.16666666666666666
+                }
+              }
+            }
+          },
+          "knn_cross_env_f1_feature_ablation": {
+            "size features only": 0.047619047619047616,
+            "timing/volume/order features only": 0.047619047619047616
+          },
+          "cost": {
+            "wire_bytes_vs_pad16_pct_by_class": {
+              "web": 1367.7521887137632,
+              "video": 211.38243391200749,
+              "voip": 32397.093602916557,
+              "bulk": 66.43632297063374,
+              "chat": 18461.806517746,
+              "interactive": 94536.01427620568
+            },
+            "wire_bytes_vs_pad16_pct": 500.2211471819764,
+            "wire_bytes_vs_ip_pct": 523.7187767392064,
+            "datagrams_seen_vs_real_packets": 4.1616928656792815,
+            "added_latency_ms_median": 69.12048344553989,
+            "added_latency_ms_p95": 1933.8342920826087,
+            "real_packets_not_sent_within_window_pct": 18.88631711683467
+          }
+        }
+      },
+      "elapsed_s": 23.092632020999986
+    }
+  ]
+}

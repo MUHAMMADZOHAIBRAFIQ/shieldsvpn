@@ -11,6 +11,7 @@ import os
 import re
 import tomllib
 from dataclasses import dataclass, field
+from typing import Any, Never, cast, overload
 
 from .crypto.suites import (DEFAULT_CA_SIG_ALGS, DEFAULT_PEER_SIG_ALGS, DEFAULT_SUITES, Suite,
                             sig_alg_by_name, suite_by_name)
@@ -108,11 +109,11 @@ _REQUIRED = object()
 
 
 class _Section:
-    def __init__(self, data: dict, name: str, base: str):
+    def __init__(self, data: dict[str, object], name: str, base: str):
         self.data, self.name, self.base = data, name, base
         self.used: set[str] = set()
 
-    def _get(self, key, default, types):
+    def _get(self, key: str, default: object, types: type[Any] | tuple[type[Any], ...]) -> object:
         self.used.add(key)
         if key not in self.data:
             if default is _REQUIRED:
@@ -123,29 +124,42 @@ class _Section:
             raise ConfigError(f"[{self.name}] {key} has wrong type")
         return v
 
-    def str(self, key, default=None):
-        return self._get(key, default, str)
+    @overload
+    def str(self, key: str, default: str) -> str: ...
 
-    def int(self, key, default=None, lo=None, hi=None):
-        v = self._get(key, default, int)
+    @overload
+    def str(self, key: str, default: None = None) -> str | None: ...
+
+    def str(self, key: str, default: str | None = None) -> str | None:
+        return cast(str | None, self._get(key, default, str))
+
+    @overload
+    def int(self, key: str, default: int, lo: int | None = None, hi: int | None = None) -> int: ...
+
+    @overload
+    def int(self, key: str, default: None = None, lo: int | None = None, hi: int | None = None) -> int | None: ...
+
+    def int(self, key: str, default: int | None = None, lo: int | None = None,
+            hi: int | None = None) -> int | None:
+        v = cast(int | None, self._get(key, default, int))
         if v is not None and ((lo is not None and v < lo) or (hi is not None and v > hi)):
             raise ConfigError(f"[{self.name}] {key} must be in [{lo}, {hi}]")
         return v
 
-    def bool(self, key, default=False):
-        return self._get(key, default, bool)
+    def bool(self, key: str, default: bool = False) -> bool:
+        return cast(bool, self._get(key, default, bool))
 
-    def strs(self, key, default=()):
-        v = self._get(key, list(default), list)
+    def strs(self, key: str, default: tuple[str, ...] | list[str] = ()) -> list[str]:
+        v = cast(list[object], self._get(key, list(default), list))
         if not all(isinstance(x, str) for x in v):
             raise ConfigError(f"[{self.name}] {key} must be a list of strings")
-        return list(v)
+        return cast(list[str], v)
 
-    def path(self, key, default=None):
+    def path(self, key: str, default: str | None = None) -> str | None:
         v = self.str(key, default)
         return None if v is None else os.path.normpath(os.path.join(self.base, os.path.expanduser(v)))
 
-    def paths(self, key):
+    def paths(self, key: str) -> list[str]:
         return [os.path.normpath(os.path.join(self.base, os.path.expanduser(p))) for p in self.strs(key)]
 
     def check_unknown(self):
@@ -154,7 +168,7 @@ class _Section:
             raise ConfigError(f"[{self.name}] unknown key(s): {', '.join(sorted(extra))}")
 
 
-def _as_tuple(t):
+def _as_tuple(t: type[Any] | tuple[type[Any], ...]) -> tuple[type[Any], ...]:
     return t if isinstance(t, tuple) else (t,)
 
 
@@ -212,27 +226,34 @@ def _crypto(sec: _Section) -> CryptoConfig:
     return CryptoConfig(suites, peer, ca, psk, rekey)
 
 
-def _load(path: str) -> tuple[dict, str]:
+def _load(path: str) -> tuple[dict[str, object], str]:
     try:
         with open(path, "rb") as f:
-            return tomllib.load(f), os.path.dirname(os.path.abspath(path))
+            return cast(dict[str, object], tomllib.load(f)), os.path.dirname(os.path.abspath(path))
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise ConfigError(f"{path}: {exc}") from None
 
 
-def _top(data: dict, allowed: set[str]) -> None:
+def _top(data: dict[str, object], allowed: set[str]) -> None:
     extra = set(data) - allowed
     if extra:
         raise ConfigError(f"unknown section(s): {', '.join(sorted(extra))}")
 
 
+def _section(data: dict[str, object], name: str, base: str) -> _Section:
+    raw = data.get(name, {})
+    if not isinstance(raw, dict):
+        raise ConfigError(f"[{name}] must be a table")
+    return _Section(cast(dict[str, object], raw), name, base)
+
+
 def load_server(path: str) -> ServerConfig:
     data, base = _load(path)
     _top(data, {"server", "tunnel", "crypto", "security", "portal"})
-    s = _Section(data.get("server", {}), "server", base)
-    pt = _Section(data.get("portal", {}), "portal", base)
-    t = _Section(data.get("tunnel", {}), "tunnel", base)
-    sec = _Section(data.get("security", {}), "security", base)
+    s = _section(data, "server", base)
+    pt = _section(data, "portal", base)
+    t = _section(data, "tunnel", base)
+    sec = _section(data, "security", base)
     host, port = _hostport(s.str("listen", "0.0.0.0:51820"), "[server] listen")
     cfg = ServerConfig(
         listen_host=host.strip("[]"), listen_port=port,
@@ -246,7 +267,7 @@ def load_server(path: str) -> ServerConfig:
         dns=_check_ips(t.strs("dns"), "[tunnel] dns"),
         push_routes=_check_nets(t.strs("push_routes"), "[tunnel] push_routes"),
         nat_interface=t.str("nat_interface", ""),
-        crypto=_crypto(_Section(data.get("crypto", {}), "crypto", base)),
+        crypto=_crypto(_section(data, "crypto", base)),
         revoked={x.lower() for x in sec.strs("revoked_serials")},
         max_peers=sec.int("max_peers", 1024, 1, 1 << 20),
         cookie_threshold=sec.int("cookie_threshold", 64, 0, 1 << 20),
@@ -270,9 +291,9 @@ def load_server(path: str) -> ServerConfig:
 def load_client(path: str) -> ClientConfig:
     data, base = _load(path)
     _top(data, {"client", "tunnel", "crypto", "security"})
-    c = _Section(data.get("client", {}), "client", base)
-    t = _Section(data.get("tunnel", {}), "tunnel", base)
-    sec = _Section(data.get("security", {}), "security", base)
+    c = _section(data, "client", base)
+    t = _section(data, "tunnel", base)
+    sec = _section(data, "security", base)
     host, port = _hostport(c.str("server") or _missing("client", "server"), "[client] server")
     cfg = ClientConfig(
         server_host=host, server_port=port,
@@ -288,7 +309,7 @@ def load_client(path: str) -> ClientConfig:
         use_server_dns=t.bool("use_server_dns", True),
         dns=_check_ips(t.strs("dns"), "[tunnel] dns"),
         persistent_keepalive=t.int("persistent_keepalive", 25, 0, 3600),
-        crypto=_crypto(_Section(data.get("crypto", {}), "crypto", base)),
+        crypto=_crypto(_section(data, "crypto", base)),
         revoked={x.lower() for x in sec.strs("revoked_serials")},
         portal_url=c.str("portal_url", ""),
     )
@@ -299,15 +320,15 @@ def load_client(path: str) -> ClientConfig:
     return cfg
 
 
-def _missing(section: str, key: str):
+def _missing(section: str, key: str) -> Never:
     raise ConfigError(f"[{section}] {key} is required")
 
 
 def load_portal(path: str) -> PortalConfig:
     data, base = _load(path)
     _top(data, {"portal", "vpn"})
-    p = _Section(data.get("portal", {}), "portal", base)
-    v = _Section(data.get("vpn", {}), "vpn", base)
+    p = _section(data, "portal", base)
+    v = _section(data, "vpn", base)
     listen = [_hostport(x, "[portal] listen") for x in p.strs("listen", ["127.0.0.1:8800"])]
     listen = [(h.strip("[]"), port) for h, port in listen]
     tls_cert, tls_key = p.path("tls_certificate"), p.path("tls_private_key")
