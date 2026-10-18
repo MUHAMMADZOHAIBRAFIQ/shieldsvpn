@@ -14,7 +14,7 @@ A layer-3 VPN whose key exchange and authentication resist quantum computers. It
 
 All cryptography runs inside **OpenSSL ≥ 3.5** (via `ctypes`). There are **no pip dependencies**: just Python ≥ 3.11 and an OpenSSL 3.5+ `libcrypto`.
 
-The protocol design (IKEv2-style handshake, RFC 9370 hybrid KEX, RFC 7383 fragmentation, WireGuard data plane) is specified in [docs/PROTOCOL.md](docs/PROTOCOL.md). The threat model and limitations are in [docs/SECURITY.md](docs/SECURITY.md).
+The protocol design (IKEv2-style handshake, RFC 9370 hybrid KEX, RFC 7383 fragmentation, WireGuard data plane) is specified in [docs/PROTOCOL.md](docs/PROTOCOL.md). The threat model and limitations are in [docs/SECURITY.md](docs/SECURITY.md). Product requirements and roadmap are in [docs/PRD.md](docs/PRD.md), and the system specification is in [docs/SPEC.md](docs/SPEC.md).
 
 ## Features
 
@@ -215,7 +215,7 @@ These figures come from the development machine (single core, both endpoints on 
 ## Tests
 
 ```bash
-python -m unittest discover -s tests -v      # 63 tests, ~50 s
+python -m unittest discover -s tests -v      # 112 tests (some skipped on Windows), ~1 min
 python -m pqvpn selftest                     # all four suites end to end
 ```
 

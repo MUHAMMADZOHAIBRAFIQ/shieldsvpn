@@ -25,7 +25,7 @@
 
 ## Known limitations (read before production use)
 
-1. **Not independently audited.** The design follows established patterns, and the code has a 38-test adversarial suite (downgrade, replay, tampering, spoofing, wrong CA, revoked certificates, PSK mismatch, packet loss, cookies, rekey, roaming, fuzzing). That is not a substitute for a third-party audit.
+1. **Not independently audited.** The design follows established patterns, and the code has a 41-test adversarial suite (downgrade, replay, tampering, spoofing, wrong CA, revoked certificates, PSK mismatch, packet loss, cookies, rekey, roaming, fuzzing). That is not a substitute for a third-party audit.
 2. **Python memory hygiene.** Python cannot reliably zeroise secrets in memory. Private keys live inside OpenSSL objects (freed with `EVP_PKEY_free`), but derived session keys briefly exist as Python `bytes`. Protect the host: disable swap or use encrypted swap, and disable core dumps.
 3. **Initiator identity vs. active attackers.** As in IKEv2, the client sends its (encrypted) certificate before it has authenticated the server. An active attacker who impersonates the server's network endpoint can learn *which* client is connecting, but cannot impersonate either side or read traffic.
 4. **Handshake-level DoS by an on-path attacker.** An attacker who can see INIT can race a forged RESPONSE and stall that attempt. It fails closed, and a new attempt starts within 30 s. On-path attackers can always drop packets anyway.

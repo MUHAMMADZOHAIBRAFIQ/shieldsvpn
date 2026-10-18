@@ -2,7 +2,7 @@
 
 A native Android VPN app that runs the **existing pqvpn protocol** through Android's official `VpnService`. It uses the same post-quantum handshake (ML-KEM + X25519/P-384, ML-DSA, SLH-DSA CA), the same packet format, and the same rekey, roaming and reconnect logic as the desktop clients. It connects to an unmodified pqvpn server.
 
-> **Status:** working debug build, tested end to end on the Android 16 (API 36) x86_64 emulator against a real `pqvpn` server process. It has not been tested on a physical phone or against your production server yet. See [What was verified](#what-was-verified). It has not been independently audited and is not production-ready.
+> **Status:** working debug build, tested end to end on the Android 16 (API 36) x86_64 emulator against a real `pqvpn` server process. A physical phone has connected to the live test server (split tunnel); full-tunnel internet through that server and systematic testing on physical devices are still pending. See [What was verified](#what-was-verified). It has not been independently audited and is not production-ready.
 
 ## How it works
 
@@ -223,7 +223,9 @@ All of this was on the API 36 x86_64 emulator (Google Play image), against a thr
 * **Native self-test:** `pqcrypto_selftest` passed all 9 checks against the packaged x86_64 `libcrypto_pqvpn.so`. Provenance (verified tarball signature and NDK checksum) is in [native/PROVENANCE.md](native/PROVENANCE.md).
 * **APK secret scan:** `python tools/secret_scan.py app/build/outputs/apk/debug/app-debug.apk` found 0 findings, including inside the nested Chaquopy archives.
 
-**Not verified:** a physical device, your production server or playit endpoint, real internet browsing through a NAT-ing server, a real IPv6 network (the emulator has no global IPv6), and Android versions other than 16.
+**Since then, on a physical phone:** the app connected to the live Kali server through the playit endpoint in split-tunnel mode (handshake and tunnel up; profiles were split tunnel at the time, so no internet traffic used the VPN).
+
+**Not verified:** systematic physical-device testing, full-tunnel internet browsing through a NAT-ing server, a real IPv6 network (the emulator has no global IPv6), and Android versions other than 16.
 
 ## Limitations
 
