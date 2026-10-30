@@ -79,6 +79,7 @@ object UiJson {
                 .put("canConnect", info.canConnect)
                 .put("reason", info.reason)
                 .put("rewardsLeft", info.rewardsLeft)
+                .put("nextAdIn", info.nextRewardSeconds(wallNowMs / 1000))
                 .put("freeMinutes", info.freeMinutes)
                 .put("accounts", info.accounts)
                 .put("ads", info.admob)

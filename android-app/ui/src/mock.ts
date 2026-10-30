@@ -99,8 +99,9 @@ export function mockBridge(): Bridge {
         break
       case 'watchAd':
         busyThen(1500, () => {
-          setAccount({ freeSecondsLeft: left() + account.freeMinutes * 60, at: Date.now(), rewardsLeft: account.rewardsLeft - 1 })
-          emit({ type: 'notice', kind: 'ok', title: 'Free time', text: `You have ${account.freeMinutes} more minutes.` })
+          setAccount({ freeSecondsLeft: left() + account.freeMinutes * 60, at: Date.now(),
+            rewardsLeft: account.rewardsLeft - 1, nextAdIn: 10 })
+          emit({ type: 'notice', kind: 'ok', title: 'Free time', text: `${account.freeMinutes} minutes added.` })
         })
         break
       case 'signIn':

@@ -79,6 +79,17 @@ class AccountTest {
     }
 
     @Test
+    fun nextAdCountsDownFromTheAnswer() {
+        val a = AccountInfo.fromMe(JSONObject("""{"plan": "free", "next_reward_in": 10}"""), phoneNowSec = 500)
+        assertEquals(10L, a.nextRewardSeconds(500))
+        assertEquals(3L, a.nextRewardSeconds(507))
+        assertEquals(0L, a.nextRewardSeconds(600))
+        assertEquals(0L, AccountInfo.fromMe(JSONObject("""{"next_reward_in": -5}"""), 0).nextRewardSeconds(0))
+        val m = UiJson.account(true, a, busy = false, wallNowMs = 504_000).getJSONObject("account")
+        assertEquals(6L, m.getLong("nextAdIn"))
+    }
+
+    @Test
     fun proPlansKeepOnlyKnownPeriodsOnce() {
         val a = AccountInfo.fromMe(me(), 1_000_000)
         assertEquals(listOf(PriceOption("week", "Weekly", "USD 1.99 / week"), PriceOption("month", "Monthly", "USD 4.99 / month")),

@@ -163,6 +163,25 @@ class TestAdsOnlyWhileDisconnected(FreeTimeBase):
         self.assertFalse(self.store.is_connected(d["subject"], int(time.time()) + 1))  # heartbeat too old
 
 
+class TestAdsBuildUpTime(FreeTimeBase):
+    def test_ads_follow_each_other_after_a_short_wait(self):
+        d = self.device(0)
+        settings = {**devices.APP_DEFAULTS, "admob_enabled": "1", "admob_require_ssv": "0"}
+        now = int(time.time())
+        for n in range(3):  # three ads in a row, never connecting: the balance only grows
+            nonce = devices.start_reward(self.store, d, "admob", settings, now)
+            reward = self.store.reward_by_nonce(devices.nonce_hash(nonce))
+            self.assertEqual(devices.grant(self.store, reward, settings, now), (n + 1) * 1800)
+            self.assertEqual(devices.next_reward_in(self.store, d, settings, now), 10)
+            with self.assertRaises(DeviceError) as cm:
+                devices.start_reward(self.store, d, "admob", settings, now + 9)
+            self.assertEqual(cm.exception.code, "too_soon")
+            now += 10
+        self.assertEqual(self.balance(d), 5400)
+        self.assertEqual(devices.next_reward_in(self.store, d, {**settings, "reward_gap_seconds": "0"}, now), 0)
+        self.assertEqual(devices.state(self.store, self.store.vpn_device(d["id"]), settings, now - 3)["next_reward_in"], 3)
+
+
 class TestToggleAdSettings(unittest.TestCase):
     def test_modes_and_gap(self):
         self.assertEqual(devices.toggle_ads({}), "connect")  # as before: an ad after connecting

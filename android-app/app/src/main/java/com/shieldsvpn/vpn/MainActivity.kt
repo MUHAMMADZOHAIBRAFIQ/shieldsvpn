@@ -556,6 +556,11 @@ class MainActivity : AppCompatActivity() {
             notice(false, getString(R.string.free_time_title), getString(R.string.ad_disconnect_first))
             return
         }
+        val wait = a.nextRewardSeconds(System.currentTimeMillis() / 1000)
+        if (wait > 0) {   // the button shows the countdown; a tap that slips through just explains it
+            notice(false, getString(R.string.free_time_title), getString(R.string.next_ad_in, wait))
+            return
+        }
         accountBusy = true
         pushAccount()
         io.execute {
@@ -613,8 +618,10 @@ class MainActivity : AppCompatActivity() {
                         skipNextInterstitial = true   // they just watched an ad for this connection
                         onConnect()
                     } else {
+                        // A toast, not a dialog: the next ad's countdown stays in view to build up more time.
+                        val minutes = account?.freeMinutes ?: 30
                         notice(true, getString(R.string.free_time_title),
-                            "You have ${account?.freeMinutes ?: 30} more minutes. Tap Connect to use them.")
+                            resources.getQuantityString(R.plurals.free_time_added, minutes, minutes))
                     }
                 } else {
                     pushAccount()

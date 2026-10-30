@@ -223,6 +223,14 @@ describe('Screen', () => {
     expect(freeLeft({ ...a, at: 5000 }, 1000, 500)).toBe(60) // clock went back: never adds time
   })
 
+  it('lets ads follow each other after a short wait, to build up time', () => {
+    const waiting = { ...free, at: NOW - 3000, nextAdIn: 10 } // measured 3 s ago: 7 s to go
+    const html = render({ profile: { ...profile, enrolled: true } }, traffic, false, waiting)
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Next ad in 7 s<\/button>/)
+    const ready = render({ profile: { ...profile, enrolled: true } }, traffic, false, { ...waiting, at: NOW - 11_000 })
+    expect(ready).toMatch(/<button type="button" class="btn btn--primary btn--wide">Watch an ad · \+30 min<\/button>/)
+  })
+
   it('runs the clock while connected and asks to disconnect before an ad', () => {
     const html = render({ profile: { ...profile, enrolled: true }, phase: 'connected', active: true,
       connectedSince: NOW - 5000 }, traffic, false, free)

@@ -274,9 +274,14 @@ class TestAppApi(unittest.IsolatedAsyncioTestCase):
         self.assertAlmostEqual(me["free_until"], before + 1800, delta=5)  # what older app builds read
         st, _ = app.call("POST", "/api/v1/reward/claim", {"nonce": nonce})
         self.assertEqual(st, 409)  # single use
+        self.assertEqual(me["next_reward_in"], 10)  # the next ad after a short wait (default 10 s) ...
+        st, data = app.call("POST", "/api/v1/reward/start", {"kind": "admob"})
+        self.assertEqual((st, data["error"]), (429, "too_soon"))
+        self.portal.store._exec("UPDATE reward_grants SET granted_at = granted_at - 11")  # ... 11 s later
+        self.assertEqual(app.me()["next_reward_in"], 0)
         _, data = app.call("POST", "/api/v1/reward/start", {"kind": "admob"})
         st, me = app.call("POST", "/api/v1/reward/claim", {"nonce": data["nonce"]})
-        self.assertEqual(me["free_seconds"], 3600)  # time adds up
+        self.assertEqual(me["free_seconds"], 3600)  # time adds up without using the first ad's time
         self.assertEqual(me["rewards_left_today"], 0)
         st, data = app.call("POST", "/api/v1/reward/start", {"kind": "admob"})
         self.assertEqual((st, data["error"]), (429, "daily_limit"))
@@ -302,6 +307,7 @@ class TestAppApi(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(app.me()["can_connect"])
         st, data = app.call("GET", "/api/v1/admob/ssv?" + self.ssv_query(nonce, "tx-1"), token=False)
         self.assertEqual((st, data), (200, {"ok": False}))  # Google retrying the same callback grants nothing
+        self.portal.store._exec("UPDATE reward_grants SET granted_at = granted_at - 11")  # past the wait between ads
         _, data = app.call("POST", "/api/v1/reward/start", {"kind": "admob"})
         st, data = app.call("GET", "/api/v1/admob/ssv?" + self.ssv_query(data["nonce"], "tx-1"), token=False)
         self.assertEqual(data, {"ok": False})  # a reused transaction id cannot be attached to a new nonce

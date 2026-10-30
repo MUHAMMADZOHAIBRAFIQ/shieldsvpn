@@ -447,6 +447,11 @@ class Store:
         return self._one("SELECT COUNT(*) AS n FROM reward_grants WHERE device_id = ? AND granted_at >= ?",
                          (device_id, since))["n"]
 
+    def last_reward_granted(self, device_id: int) -> int:
+        """When this device last earned free time from an ad (Unix seconds; 0 = never, or longer ago than 7 days)."""
+        return int(self._one("SELECT MAX(granted_at) AS t FROM reward_grants WHERE device_id = ?", (device_id,))["t"]
+                   or 0)
+
     def purge_rewards(self, older_than: int) -> None:
         self._exec("DELETE FROM reward_grants WHERE created_at < ?", (int(time.time()) - older_than,))
 

@@ -55,6 +55,7 @@ APP_DEFAULTS = {
     "enroll_per_ip_day": "20",   # enrollments per source address per 24 h
     "toggle_ads": "connect",     # Free devices: interstitial after "connect", after "both" connect and disconnect, "off"
     "toggle_ad_gap": "0",        # at least this many seconds between two such interstitials (0 = every time)
+    "reward_gap_seconds": "10",  # wait between two ads for free time; ads may follow each other to build up time
 }
 TOGGLE_ADS = {"connect": "After connecting", "both": "After connecting and after disconnecting", "off": "Never"}
 # A connected app sends at least a keepalive every 25 s (account_client.py); silence for longer means it is gone.
@@ -64,7 +65,7 @@ REWARD_IDLE_SECONDS = 12
 # (min, max) for the numeric settings; the admin form and every reader clamp to these.
 LIMITS = {"free_minutes": (1, 24 * 60), "free_daily_rewards": (1, 200), "reward_min_seconds": (5, 300),
           "pro_device_limit": (1, 50), "device_cleanup_days": (1, 3650), "enroll_per_ip_day": (1, 10000),
-          "toggle_ad_gap": (0, 3600)}
+          "toggle_ad_gap": (0, 3600), "reward_gap_seconds": (0, 3600)}
 
 
 class DeviceError(Exception):
@@ -237,6 +238,7 @@ def state(store: Store, device: dict, settings: dict, now: int, prices: list[dic
         "reason": d.reason,
         "free_minutes": number(settings, "free_minutes"),
         "rewards_left_today": max(0, number(settings, "free_daily_rewards") - granted),
+        "next_reward_in": next_reward_in(store, device, settings, now),  # seconds until the next ad may start
         "features": {
             "accounts": enabled(settings, "app_accounts"),
             "admob": enabled(settings, "admob_enabled"),
@@ -283,6 +285,8 @@ def start_reward(store: Store, device: dict, kind: str, settings: dict, now: int
                           "only used while you are connected")
     if store.rewards_granted_since(device["id"], now - 86400) >= number(settings, "free_daily_rewards"):
         raise DeviceError(429, "daily_limit", "you reached today's limit of free sessions; try again tomorrow")
+    if (wait := next_reward_in(store, device, settings, now)) > 0:
+        raise DeviceError(429, "too_soon", f"the next ad is ready in {wait} seconds")
     nonce = secrets.token_urlsafe(24)
     store.create_reward(device["id"], kind, nonce_hash(nonce))
     return nonce
@@ -298,6 +302,13 @@ def grant(store: Store, reward: dict, settings: dict, now: int, provider_ref: st
     if not store.claim_reward(reward["id"], now, provider_ref):
         return None
     return store.add_free_seconds(reward["device_id"], number(settings, "free_minutes") * 60)
+
+
+def next_reward_in(store: Store, device: dict, settings: dict, now: int) -> int:
+    """Seconds until this device may watch the next ad for free time (0 = now).  Ads may follow each other, so
+    time builds up without being used first; only a short gap (reward_gap_seconds) separates them."""
+    last = store.last_reward_granted(device["id"])
+    return max(0, last + number(settings, "reward_gap_seconds") - now) if last else 0
 
 
 def toggle_ads(settings: dict) -> str:

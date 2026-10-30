@@ -107,7 +107,7 @@ export function Menu(props: MenuProps) {
 
         {free && a.ads && a.rewardsLeft > 0 && (
           <MenuItem icon={<IconPlay />} label={`Get ${a.freeMinutes} free minutes`}
-            detail={props.connected ? 'Disconnect first' : 'Watch a short ad'}
+            detail={props.connected ? 'Disconnect first' : a.nextAdIn > 0 ? 'Next ad in a few seconds' : 'Watch a short ad'}
             disabled={a.busy || props.connected} onClick={run(props.onWatchAd)} />
         )}
 

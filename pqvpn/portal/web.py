@@ -1602,6 +1602,7 @@ _APP_NUMBERS = (
     ("device_cleanup_days", "Forget unused anonymous devices after (days)"),
     ("enroll_per_ip_day", "New devices per network per day"),
     ("toggle_ad_gap", "Seconds between connect/disconnect ads (0 = every time)"),
+    ("reward_gap_seconds", "Seconds between two ads for free time"),
 )
 
 
@@ -1650,7 +1651,7 @@ def do_admin_settings_apps(h: Handler) -> None:
         return page_admin_settings(h, error="Choose when the connect/disconnect ad is shown.")
     for k, label in _APP_NUMBERS:
         lo, hi = devices.LIMITS[k]
-        default = str(devices.number(current, k)) if k == "toggle_ad_gap" else ""
+        default = str(devices.number(current, k)) if k in ("toggle_ad_gap", "reward_gap_seconds") else ""
         try:
             n = int(h.form.get(k, default))
         except ValueError:
@@ -2145,7 +2146,8 @@ ads, or Pro), what they use and how they pay.</p></div></div>
 <dt>Free time per ad</dt><dd>{devices.number(s, "free_minutes")} min, used only while connected</dd>
 <dt>Ad on connect / disconnect</dt><dd>{e(devices.TOGGLE_ADS[devices.toggle_ads(s)])}{
      f" (at most one per {devices.number(s, 'toggle_ad_gap')} s)" if devices.number(s, "toggle_ad_gap") else ""}</dd>
-<dt>Ads per device per day</dt><dd>{devices.number(s, "free_daily_rewards")}</dd>
+<dt>Ads per device per day</dt><dd>{devices.number(s, "free_daily_rewards")}, one after another (wait
+{devices.number(s, "reward_gap_seconds")} s between two) to build up time</dd>
 <dt>Devices with free time left</dt><dd>{total['with_free_time']}</dd>
 <dt>New devices per network per day</dt><dd>{devices.number(s, "enroll_per_ip_day")}</dd>
 <dt>Unused anonymous devices removed after</dt><dd>{devices.number(s, "device_cleanup_days")} days</dd></dl>

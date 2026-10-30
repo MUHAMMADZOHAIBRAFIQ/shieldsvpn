@@ -232,6 +232,7 @@ until they comply.
 | `firebase_*` | | mirror state; the key itself is `firebase-key.json` (0600) |
 | `app_enrollment`, `app_accounts` | `0`, `0` | apps may register themselves (Free); apps may sign in / sign up / reset passwords |
 | `free_minutes`, `free_daily_rewards` | `30`, `16` | free time per watched ad (a balance used only while connected); ads that grant time per device per 24 h |
+| `reward_gap_seconds` | `10` | wait between two ads for free time: ads may follow each other to build up time (`/me` `next_reward_in`; `429 too_soon` before it) |
 | `toggle_ads`, `toggle_ad_gap` | `connect`, `0` | Free devices' interstitial after `connect`, after `both` connect and disconnect, or `off`; minimum seconds between two |
 | `admob_enabled`, `admob_require_ssv` | `0`, `1` | Android rewarded ads; `0` = test mode (trust the app's report) |
 | `web_ads_enabled`, `web_ads_test`, `reward_min_seconds` | `0`, `0`, `20` | Windows ad page; labelled placeholder ad; minimum viewing time |

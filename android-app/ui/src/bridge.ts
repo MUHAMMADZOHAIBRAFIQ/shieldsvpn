@@ -82,6 +82,8 @@ export interface Account {
   canConnect: boolean
   reason: string
   rewardsLeft: number
+  /** Seconds until the next ad for free time may start, measured at `at` (ads may follow each other). */
+  nextAdIn: number
   freeMinutes: number
   /** The portal allows sign-in / sign-up from the app. */
   accounts: boolean
@@ -190,6 +192,7 @@ export const noAccount: Account = {
   canConnect: false,
   reason: '',
   rewardsLeft: 0,
+  nextAdIn: 0,
   freeMinutes: 30,
   accounts: false,
   ads: false,
@@ -309,6 +312,7 @@ function parseAccount(a: Record<string, unknown>): Account {
     canConnect: a.canConnect === true,
     reason: str(a.reason),
     rewardsLeft: num(a.rewardsLeft),
+    nextAdIn: Math.max(0, num(a.nextAdIn)),
     freeMinutes: num(a.freeMinutes, 30),
     accounts: a.accounts === true,
     ads: a.ads === true,

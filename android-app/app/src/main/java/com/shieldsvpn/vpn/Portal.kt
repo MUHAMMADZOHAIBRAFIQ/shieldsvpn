@@ -28,6 +28,8 @@ data class AccountInfo(
     val canConnect: Boolean = false,
     val reason: String = "",
     val rewardsLeft: Int = 0,
+    /** Seconds until the next ad for free time may start, when the portal answered (ads may follow each other). */
+    val nextRewardIn: Long = 0,
     val freeMinutes: Int = 30,
     val accounts: Boolean = false,
     val admob: Boolean = false,
@@ -53,6 +55,9 @@ data class AccountInfo(
     /** Free time left now, in seconds: it went down since the answer only if the server was counting then. */
     fun freeSecondsLeft(phoneNowSec: Long): Long =
         if (freeCounting) maxOf(0, freeSeconds - maxOf(0, phoneNowSec - measuredAt)) else freeSeconds
+
+    /** Seconds until the next ad for free time may start, now. */
+    fun nextRewardSeconds(phoneNowSec: Long): Long = maxOf(0, nextRewardIn - maxOf(0, phoneNowSec - measuredAt))
 
     /** When a Free session that is connected now runs out, on the phone's clock (ms); 0 = no limit (Pro). */
     fun stopAtMs(phoneNowMs: Long): Long = if (pro) 0 else phoneNowMs + freeSecondsLeft(phoneNowMs / 1000) * 1000
@@ -84,6 +89,7 @@ data class AccountInfo(
                 canConnect = me.optBoolean("can_connect"),
                 reason = me.optString("reason"),
                 rewardsLeft = me.optInt("rewards_left_today"),
+                nextRewardIn = me.optLong("next_reward_in").coerceIn(0, 3600),
                 freeMinutes = me.optInt("free_minutes", 30),
                 accounts = f.optBoolean("accounts"),
                 admob = f.optBoolean("admob"),

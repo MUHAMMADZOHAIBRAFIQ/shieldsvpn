@@ -3,6 +3,11 @@ import type { Account, AccountResult, Outbound, Period, PriceOption } from './br
 import { formatDate, formatDuration } from './format'
 import { IconClock, IconCrown, IconExternal, IconTick } from './icons'
 
+/** Seconds until the next ad for free time may start, counted down from when the app measured it. */
+export function nextAdIn(a: Account, now: number): number {
+  return Math.max(0, a.nextAdIn - Math.floor(Math.max(0, now - a.at) / 1000))
+}
+
 /**
  * Free seconds left at `now`.  Free time is a balance used up only while connected: it goes down only when
  * `runningSince` (when the tunnel came up, Unix ms; 0 = not connected) is set, and only from the later of that
@@ -38,6 +43,7 @@ export function PlanCard(props: {
   const { account: a, now } = props
   const pro = a.plan === 'premium'
   const running = (props.runningSince ?? 0) > 0
+  const wait = nextAdIn(a, now)
   const left = freeLeft(a, now, props.runningSince ?? 0)
   const several = !pro && a.accounts && a.payments && a.prices.length > 1
   const sheet = several && props.onChoosePlan !== undefined
@@ -67,8 +73,9 @@ export function PlanCard(props: {
           <p className="note plan__rule">Free time is used only while you are connected.</p>
           {a.ads && (
             <button type="button" className="btn btn--primary btn--wide"
-              disabled={a.busy || a.rewardsLeft <= 0 || props.connected} onClick={props.onWatchAd}>
-              {a.busy ? 'Please wait…' : `Watch an ad · +${a.freeMinutes} min`}
+              disabled={a.busy || a.rewardsLeft <= 0 || props.connected || wait > 0} onClick={props.onWatchAd}>
+              {a.busy ? 'Please wait…' : wait > 0 && !props.connected && a.rewardsLeft > 0
+                ? `Next ad in ${wait} s` : `Watch an ad · +${a.freeMinutes} min`}
             </button>
           )}
           {a.ads && props.connected && <p className="note">Disconnect to watch an ad and add free time.</p>}
