@@ -29,6 +29,17 @@
     <string name="vpn_settings">VPN settings</string>
     <string name="no_vpn_settings">This device has no VPN settings screen.</string>
 
+    <string name="free_time_ended">Your free time is over. Watch a short ad to get more, or go Pro for unlimited time.</string>
+    <string name="register_failed">Could not set up this phone</string>
+    <string name="account_title">Account</string>
+    <string name="free_time_title">Free time</string>
+    <string name="no_free_time">You have no free time left. Watch a short ad to get %1$d minutes, or go Pro.</string>
+    <string name="ad_not_confirmed">The ad was not confirmed yet. If your free time does not appear in a minute, try another ad.</string>
+    <string name="go_pro">Go Pro</string>
+    <string name="play_pending">Your payment is pending. Pro switches on as soon as Google Play confirms it.</string>
+    <string name="play_done">You are on ShieldsVPN Pro. Thank you!</string>
+    <string name="privacy_policy">Privacy policy</string>
+
     <string name="notif_channel">VPN status</string>
     <string name="notif_channel_desc">Shown while ShieldsVPN is connecting or connected.</string>
     <string name="notif_disconnect">Disconnect</string>

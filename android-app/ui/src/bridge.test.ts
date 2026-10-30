@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { type Inbound, type NativePort, initialState, nativeBridge, parseInbound } from './bridge'
+import { type Inbound, type NativePort, initialState, nativeBridge, noAccount, parseInbound } from './bridge'
 
 describe('parseInbound', () => {
   it('accepts well-formed messages and fills missing state fields', () => {
@@ -28,6 +28,39 @@ describe('parseInbound', () => {
     ]) {
       expect(parseInbound(bad)).toBeNull()
     }
+  })
+})
+
+describe('account messages', () => {
+  it('parses the plan card and coerces bad fields to safe defaults', () => {
+    const m = parseInbound(JSON.stringify({
+      type: 'account',
+      account: { available: true, portal: true, known: true, at: 5, plan: 'premium', freeSecondsLeft: 90, proUntil: 1_900_000,
+        signedIn: true, email: 'sam@example.com', ads: true, accounts: true, payments: true, priceLabel: 'PKR 500' },
+    }))
+    expect(m?.type === 'account' && m.account).toMatchObject({ plan: 'premium', proUntil: 1_900_000, email: 'sam@example.com',
+      freeSecondsLeft: 90, payments: true })
+    const plans = parseInbound(JSON.stringify({ type: 'account', account: { prices: [
+      { period: 'week', name: 'Weekly', label: 'USD 1.99 / week' }, { period: 'day', name: 'Daily', label: 'x' },
+      { period: 'week', name: 'Again', label: 'duplicate' }, 'junk', { period: 'year', label: 7 }] } }))
+    expect(plans?.type === 'account' && plans.account.prices).toEqual([
+      { period: 'week', name: 'Weekly', label: 'USD 1.99 / week' }, { period: 'year', name: '', label: '' }])
+    const store = parseInbound(JSON.stringify({ type: 'account', account: { imports: false, privacy: true } }))
+    expect(store?.type === 'account' && [store.account.imports, store.account.privacy]).toEqual([false, true])
+    const odd = parseInbound(JSON.stringify({ type: 'account', account: { plan: 'gold', freeSecondsLeft: -5, email: 7,
+      available: 'yes', proUntil: 'soon', freeMinutes: 'x', prices: 'many', imports: 'no', privacy: 'yes' } }))
+    expect(odd?.type === 'account' && odd.account).toEqual({ ...noAccount, freeSecondsLeft: 0 })
+    expect(parseInbound(JSON.stringify({ type: 'account', account: null }))).toBeNull()
+  })
+
+  it('parses the Back key message', () => {
+    expect(parseInbound(JSON.stringify({ type: 'back', extra: 'ignored' }))).toEqual({ type: 'back' })
+  })
+
+  it('parses account results', () => {
+    expect(parseInbound(JSON.stringify({ type: 'accountResult', op: 'signIn', ok: false, code: 'totp_required', message: 'm' })))
+      .toEqual({ type: 'accountResult', op: 'signIn', ok: false, code: 'totp_required', message: 'm' })
+    expect(parseInbound(JSON.stringify({ type: 'accountResult', op: 'signIn', ok: 'true' }))).toBeNull()
   })
 })
 

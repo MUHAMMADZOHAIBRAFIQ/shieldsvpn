@@ -23,6 +23,11 @@
         android:theme="@style/Theme.ShieldsVPN"
         tools:targetApi="36">
 
+        <!-- Google AdMob app ID (Free plan ads).  Set in deploy.properties; defaults to Google's test app ID. -->
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="${admobAppId}" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

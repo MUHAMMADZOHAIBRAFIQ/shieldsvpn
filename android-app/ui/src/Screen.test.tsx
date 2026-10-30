@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { type Phase, type Profile, type VpnState, initialState } from './bridge'
+import { type Account, type Phase, type Profile, type VpnState, initialState, noAccount } from './bridge'
+import { freeLeft } from './account'
 import { Screen, type TrafficView } from './Screen'
 
 const NOW = Date.UTC(2026, 9, 17, 12)
@@ -17,11 +18,16 @@ const profile: Profile = {
 const traffic: TrafficView = { down: 3 * 1024 * 1024, up: 512 * 1024, downRate: 2048, upRate: 512, downHistory: [0, 1024, 2048], upHistory: [0, 256, 512] }
 const noop = () => {}
 
-function render(state: Partial<VpnState>, t: TrafficView = traffic, demo = false): string {
+function render(state: Partial<VpnState>, t: TrafficView = traffic, demo = false, account?: Account): string {
   return renderToStaticMarkup(
     <Screen state={{ ...initialState, ...state }} traffic={t} now={NOW} onPower={noop} onImport={noop} onRemove={noop}
-      onOpenPortal={noop} onOpenVpnSettings={noop} demo={demo} />,
+      onOpenPortal={noop} onOpenVpnSettings={noop} demo={demo} account={account} />,
   )
+}
+
+const free: Account = {
+  ...noAccount, available: true, portal: true, known: true, at: NOW - 10_000, freeSecondsLeft: 1810, canConnect: true,
+  rewardsLeft: 3, accounts: true, ads: true, priceLabel: 'PKR 500 / month',
 }
 
 describe('Screen', () => {
@@ -68,6 +74,12 @@ describe('Screen', () => {
     expect(html).toContain('Disconnect to change the profile.') // profile actions locked while active
   })
 
+  it('keeps connection details collapsed until the user opens them', () => {
+    const html = render({ phase: 'connected', active: true, profile, endpoint: '10.0.2.2:51888', tunnelAddress: '10.123.0.2/24' })
+    expect(html).toContain('<details class="card details" aria-label="Connection details"><summary>')
+    expect(html).not.toMatch(/<details[^>]*\sopen/)
+  })
+
   it('shows the error message, escaped', () => {
     const html = render({ phase: 'error', active: false, profile, message: '<img src=x onerror=alert(1)> rejected' })
     expect(html).toContain('role="alert"')
@@ -99,5 +111,110 @@ describe('Screen', () => {
   it('shows the permission hint only before Android consent exists', () => {
     expect(render({ profile, permissionNeeded: true })).toContain('Android asks you to allow')
     expect(render({ profile, permissionNeeded: false })).not.toContain('Android asks you to allow')
+  })
+
+  it('shows the Free plan with a countdown, an ad button and Go Pro', () => {
+    const html = render({ profile: { ...profile, enrolled: true } }, traffic, false, free)
+    expect(html).toContain('Free plan')
+    expect(html).toContain('00:30:00') // 1810 s measured 10 s ago
+    expect(html).toContain('Watch an ad · +30 min')
+    expect(html).toContain('Go Pro · PKR 500 / month')
+    expect(html).toContain('Sign in')
+    expect(html).toContain('This phone') // the d-xxxx device name is never shown
+    expect(html).not.toContain(profile.account)
+    const used = render({ profile }, traffic, false, { ...free, rewardsLeft: 0, freeSecondsLeft: 0 })
+    expect(used).toContain('No time left')
+    expect(used).toContain('free sessions')
+    expect(render({ profile }, traffic, false, { ...free, ads: false })).toContain('not available right now')
+  })
+
+  it('offers each Pro plan the administrator priced', () => {
+    const prices = [
+      { period: 'week' as const, name: 'Weekly', label: 'USD 1.99 / week' },
+      { period: 'month' as const, name: 'Monthly', label: 'USD 4.99 / month' },
+      { period: 'year' as const, name: 'Yearly', label: 'USD 39.99 / year' },
+    ]
+    const html = render({ profile }, traffic, false, { ...free, payments: true, prices })
+    expect(html).toContain('aria-label="Pro plans"')
+    for (const p of prices) expect(html).toContain(`Go Pro · ${p.label}`)
+    expect(html).not.toContain('PKR 500') // the single-price button is replaced
+    const one = render({ profile }, traffic, false, { ...free, payments: true, prices: [prices[1]] })
+    expect(one).toContain('Go Pro · USD 4.99 / month')
+    expect(one).not.toContain('aria-label="Pro plans"')
+    // In the app, several plans collapse into one button that opens the plan sheet (ProSheet).
+    const sheet = renderToStaticMarkup(
+      <Screen state={{ ...initialState, profile }} traffic={traffic} now={NOW} onPower={noop} onImport={noop}
+        onRemove={noop} onOpenPortal={noop} onOpenVpnSettings={noop} account={{ ...free, payments: true, prices }}
+        onChoosePlan={noop} />,
+    )
+    expect(sheet).toContain('Go Pro · from USD 1.99 / week')
+    expect(sheet).not.toContain('aria-label="Pro plans"')
+    expect(sheet.match(/Go Pro/g)).toHaveLength(1)
+  })
+
+  it('Play Store build: no profile files, deletion and privacy links', () => {
+    const play = { ...free, imports: false, privacy: true }
+    const html = render({ profile: { ...profile, enrolled: true } }, traffic, false, play)
+    expect(html).not.toContain('Replace')
+    expect(html).toContain('Privacy policy')
+    expect(render({ profile: null }, traffic, false, { ...noAccount, portal: true, imports: false }))
+      .not.toContain('Import a profile file')
+    expect(render({ profile }, traffic, false, free)).toContain('Replace') // direct builds keep the ZIP import
+    expect(html).not.toContain('Delete account') // only when signed in
+    const signedIn = renderToStaticMarkup(
+      <Screen state={{ ...initialState, profile }} traffic={traffic} now={NOW} onPower={noop} onImport={noop}
+        onRemove={noop} onOpenPortal={noop} onOpenVpnSettings={noop} account={{ ...play, signedIn: true }}
+        onDeleteAccount={noop} />,
+    )
+    expect(signedIn).toContain('Delete account')
+  })
+
+  it('shows Pro without ads or timers', () => {
+    const pro = { ...free, plan: 'premium' as const, proUntil: NOW / 1000 + 30 * 86400, signedIn: true,
+      email: 'sam@example.com', payments: true }
+    const html = render({ profile }, traffic, false, pro)
+    expect(html).toContain('ShieldsVPN Pro')
+    expect(html).toContain('Unlimited')
+    expect(html).toContain('Manage subscription')
+    expect(html).toContain('Signed in as sam@example.com')
+    expect(html).not.toContain('Watch an ad')
+    expect(html).not.toContain('Go Pro')
+    expect(html).not.toContain('blocking') // Play's VPN policy: no ad-blocking claims
+  })
+
+  it('hides the plan card for imported profiles; portal builds connect with one tap, no file', () => {
+    expect(render({ profile }, traffic, false, { ...free, available: false })).not.toContain('Free plan')
+    const setup = render({ profile: null }, traffic, false, { ...noAccount, portal: true })
+    expect(setup).toContain('aria-label="Connect"')
+    expect(setup).toContain('Tap to connect. No account needed.')
+    expect(setup).not.toContain('aria-label="Set up"') // no setup card: the power button is all it takes
+    expect(setup).not.toContain('Import')
+    const busy = render({ profile: null }, traffic, false, { ...noAccount, portal: true, busy: true })
+    expect(busy).toContain('Setting up this phone')
+    expect(busy).toContain('power--busy')
+    expect(render({ profile: null })).toContain('Import profile') // no portal: the old ZIP flow
+  })
+
+  it('has a menu button in the header', () => {
+    expect(render({ profile })).toContain('aria-label="Open menu"')
+    expect(render({ profile: null })).toContain('aria-label="Open menu"')
+  })
+
+  it('says before the tap that Connect plays a short ad when the free time is used up', () => {
+    const empty = { ...free, freeSecondsLeft: 0 }
+    const html = render({ profile: { ...profile, enrolled: true } }, traffic, false, empty)
+    expect(html).toContain('A short ad gives you 30 free minutes')
+    expect(html).toContain('Short ad · +30 min free')
+    expect(render({ profile }, traffic, false, free)).not.toContain('Short ad') // time left: connects directly
+    expect(render({ profile }, traffic, false, { ...empty, rewardsLeft: 0 })).not.toContain('Short ad')
+    expect(render({ profile }, traffic, false, { ...empty, ads: false })).not.toContain('Short ad')
+    expect(render({ profile }, traffic, false, { ...empty, plan: 'premium' })).not.toContain('Short ad')
+    expect(render({ profile, phase: 'connected', active: true }, traffic, false, empty)).not.toContain('Short ad')
+  })
+
+  it('counts free time down from when it was measured', () => {
+    expect(freeLeft({ ...free, at: 1000, freeSecondsLeft: 60 }, 31_000)).toBe(30)
+    expect(freeLeft({ ...free, at: 1000, freeSecondsLeft: 60 }, 500_000)).toBe(0)
+    expect(freeLeft({ ...free, at: 5000, freeSecondsLeft: 60 }, 1000)).toBe(60) // clock went back: never adds time
   })
 })

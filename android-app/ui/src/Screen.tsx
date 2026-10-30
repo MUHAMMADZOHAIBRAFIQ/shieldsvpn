@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
-import type { Profile, VpnState } from './bridge'
+import { PlanCard, freeLeft } from './account'
+import { type Account, type Period, type Profile, type VpnState, noAccount } from './bridge'
 import {
   daysLeft,
   encryptionParts,
@@ -19,7 +20,9 @@ import {
   IconId,
   IconImport,
   IconLock,
+  IconMenu,
   IconPin,
+  IconPlay,
   IconRoute,
   IconServer,
   IconTrash,
@@ -49,22 +52,58 @@ export interface ScreenProps {
   onOpenVpnSettings: () => void
   /** True when running in a browser against the simulated bridge (npm run dev): numbers are not real. */
   demo?: boolean
+  /** Free / Pro plan (only shown for a profile the app registered itself). */
+  account?: Account
+  onWatchAd?: () => void
+  onGoPro?: (period: Period | '') => void
+  /** Go Pro when several plans are on sale: opens the plan sheet (signing in first if needed). */
+  onChoosePlan?: () => void
+  onSignIn?: () => void
+  onSignOut?: () => void
+  onManage?: () => void
+  onDeleteAccount?: () => void
+  onPrivacy?: () => void
+  /** Opens the side menu (☰). */
+  onMenu?: () => void
+}
+
+const noop = () => {}
+
+/**
+ * Free plan with no time left, but ads can add some: Connect plays a rewarded ad first and then connects.  The
+ * screen says so before the tap (AdMob: rewarded ads must be opt-in, with the reward stated up front).
+ */
+export function adBeforeConnect(state: VpnState, account: Account, now: number): boolean {
+  return state.profile !== null && !state.active && account.available && account.known && account.plan === 'free' &&
+    account.ads && account.rewardsLeft > 0 && freeLeft(account, now) <= 0
 }
 
 /** The whole app screen, as a pure function of the state (unit-tested with renderToString). */
 export function Screen(props: ScreenProps) {
   const { state, traffic, now, onPower, onImport, onRemove, onOpenPortal, onOpenVpnSettings, demo } = props
+  const account = props.account ?? noAccount
   const info = phaseInfo(state.phase)
   const profile = state.profile
   const live = state.phase === 'connected' || (state.phase === 'reconnecting' && state.tunnelAddress !== '')
-  const buttonLabel = state.active ? 'Disconnect' : profile ? 'Connect' : 'Import a profile'
+  // A build with a portal registers this phone on the first tap: no profile file, no account (Free plan).
+  const settingUp = !profile && account.portal && state.phase === 'disconnected'
+  const withAd = adBeforeConnect(state, account, now)
+  const buttonLabel = state.active ? 'Disconnect' : profile || account.portal ? 'Connect' : 'Import a profile'
+  let line = subtitle(state.phase, state.active, profile !== null, state.importing)
+  if (settingUp) line = account.busy ? 'Setting up this phone…' : 'Tap to connect. No account needed.'
+  else if (withAd && (state.phase === 'disconnected' || state.phase === 'error')) {
+    line = `Tap to connect. A short ad gives you ${account.freeMinutes} free minutes.`
+  }
 
   return (
     <div className={`app tone-${info.tone}`}>
       <div className="backdrop" aria-hidden="true" />
       <header className="top">
+        <button type="button" className="iconbtn" aria-label="Open menu" onClick={props.onMenu ?? noop}>
+          <IconMenu />
+        </button>
         <div className="brand">
-          <ShieldLogo size={30} />
+          <ShieldLogo size={28} />
           <span>
             Shields<b>VPN</b>
           </span>
@@ -84,13 +123,18 @@ export function Screen(props: ScreenProps) {
         <section className="hero">
           <PowerButton
             tone={info.tone}
-            busy={info.busy}
+            busy={info.busy || (settingUp && account.busy)}
             label={buttonLabel}
-            disabled={state.phase === 'disconnecting' || state.importing}
+            disabled={state.phase === 'disconnecting' || state.importing || (settingUp && account.busy)}
             onPress={onPower}
           />
           <h1 aria-live="polite">{info.label}</h1>
-          <p className="sub">{subtitle(state.phase, state.active, profile !== null, state.importing)}</p>
+          <p className="sub">{line}</p>
+          {withAd && !state.active && (
+            <span className="adhint">
+              <IconPlay /> Short ad · +{account.freeMinutes} min free
+            </span>
+          )}
           {state.phase === 'connected' && state.connectedSince > 0 && (
             <div className="timer" aria-label="Connected for">
               <IconClock />
@@ -109,6 +153,12 @@ export function Screen(props: ScreenProps) {
           </div>
         )}
 
+        {profile && account.available && (
+          <PlanCard account={account} now={now} onWatchAd={props.onWatchAd ?? noop} onGoPro={props.onGoPro ?? noop}
+            onChoosePlan={props.onChoosePlan} onSignIn={props.onSignIn ?? noop} onSignOut={props.onSignOut ?? noop} onManage={props.onManage ?? noop}
+            onDeleteAccount={props.onDeleteAccount} />
+        )}
+
         {profile ? (
           <>
             <section className="traffic" aria-label="Traffic">
@@ -119,11 +169,12 @@ export function Screen(props: ScreenProps) {
             </section>
             <Details state={state} profile={profile} live={live} />
             <KillSwitch state={state} onOpenVpnSettings={onOpenVpnSettings} />
-            <ProfileCard profile={profile} now={now} locked={state.active || state.importing}
+            <ProfileCard profile={profile} now={now} locked={state.active || state.importing} imports={account.imports}
               onImport={onImport} onRemove={onRemove} onOpenPortal={onOpenPortal} />
           </>
         ) : (
-          <EmptyState importing={state.importing} onImport={onImport} />
+          // With a portal the power button is all a new user needs; profile files stay in the menu.
+          !account.portal && <EmptyState importing={state.importing} onImport={onImport} />
         )}
       </main>
 
@@ -132,6 +183,9 @@ export function Screen(props: ScreenProps) {
         <span>ML-DSA</span>
         <span>SLH-DSA</span>
         <span>post-quantum</span>
+        {account.privacy && (
+          <button type="button" className="link foot__link" onClick={props.onPrivacy ?? noop}>Privacy policy</button>
+        )}
       </footer>
     </div>
   )
@@ -185,9 +239,16 @@ function Row({ icon, label, children }: { icon: ReactNode; label: string; childr
 function Details({ state, profile, live }: { state: VpnState; profile: Profile; live: boolean }) {
   const parts = encryptionParts(state.encryption || profile.encryption)
   const full = live ? state.fullTunnel : profile.fullTunnel
+  // Collapsed by default so the server address, tunnel IP and routes are not on screen (or in screenshots) unless the
+  // user asks.  A native <details> needs no state or script; React leaves `open` alone, so it survives re-renders.
   return (
-    <section className="card details" aria-label="Connection details">
-      <h2>Connection</h2>
+    <details className="card details" aria-label="Connection details">
+      <summary>
+        <h2>Connection details</h2>
+        <svg className="details__chevron" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      </summary>
       <Row icon={<IconServer />} label="Server">
         <span>{state.server || profile.serverName}</span>
         <small>{state.endpoint || profile.server}</small>
@@ -215,7 +276,7 @@ function Details({ state, profile, live }: { state: VpnState; profile: Profile; 
           <span className="mono">{state.dns.length ? state.dns.join(', ') : 'device default'}</span>
         </Row>
       )}
-    </section>
+    </details>
   )
 }
 
@@ -260,6 +321,7 @@ function ProfileCard(props: {
   profile: Profile
   now: number
   locked: boolean
+  imports: boolean
   onImport: () => void
   onRemove: () => void
   onOpenPortal: () => void
@@ -271,9 +333,10 @@ function ProfileCard(props: {
   return (
     <section className="card profile" aria-label="Profile">
       <div className="profile__head">
-        <span className="avatar" aria-hidden="true">{profile.account.slice(0, 1).toUpperCase()}</span>
+        <span className="avatar" aria-hidden="true">{profile.enrolled ? 'S' : profile.account.slice(0, 1).toUpperCase()}</span>
         <div>
-          <div className="profile__name">{profile.account}</div>
+          {/* An app-registered device is named d-xxxx; that means nothing to people, so it is not shown. */}
+          <div className="profile__name">{profile.enrolled ? 'This phone' : profile.account}</div>
           <div className="profile__server">{profile.serverName}</div>
         </div>
       </div>
@@ -282,9 +345,11 @@ function ProfileCard(props: {
       </div>
       {locked && <p className="note">Disconnect to change the profile.</p>}
       <div className="actions">
-        <button type="button" className="btn btn--ghost" disabled={locked} onClick={props.onImport}>
-          <IconImport /> Replace
-        </button>
+        {props.imports && (
+          <button type="button" className="btn btn--ghost" disabled={locked} onClick={props.onImport}>
+            <IconImport /> Replace
+          </button>
+        )}
         {profile.portalUrl && (
           <button type="button" className="btn btn--ghost" onClick={props.onOpenPortal}>
             <IconExternal /> Portal

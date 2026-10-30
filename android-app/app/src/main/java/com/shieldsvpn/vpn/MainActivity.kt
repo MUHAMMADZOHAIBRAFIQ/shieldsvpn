@@ -26,6 +26,7 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.widget.TextView
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -40,6 +41,7 @@ import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewClientCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import com.android.billingclient.api.Purchase
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.util.concurrent.Executors
@@ -72,8 +74,40 @@ class MainActivity : AppCompatActivity() {
     private var askedForNotifications = false
     private var insets: JSONObject = UiJson.insets(0f, 0f, 0f, 0f)
     @Volatile private var uiReady = false
+    /** Free / Pro status from the portal (null = not known yet, or this build has no portal). */
+    private var account: AccountInfo? = null
+    private var accountBusy = false
+    /** Registration with the portal is running, and whether the user tapped Connect meanwhile. */
+    private var enrolling = false
+    private var connectAfterEnroll = false
+    /** connectedSince of the session we already showed the "connected" interstitial for. */
+    private var adShownFor = 0L
+    /** The user just watched a rewarded ad to connect: no second (interstitial) ad for that connection. */
+    private var skipNextInterstitial = false
+    /** Google Play Billing (Play Store build only), and the subscription's plans with Google's prices. */
+    private var billing: PlayBilling? = null
+    private var playPlans: List<PlayPlan> = emptyList()
+    private var playLoadedFor = ""
+    private var playRestored = false
 
-    private val stateListener: (VpnUiState) -> Unit = { pushState(it) }
+    private val stateListener: (VpnUiState) -> Unit = { s ->
+        pushState(s)
+        val a = account
+        if (s.phase == Phase.CONNECTED && s.connectedSince != adShownFor && accountAvailable && a != null &&
+            !a.pro && a.admob
+        ) {
+            adShownFor = s.connectedSince
+            if (skipNextInterstitial) skipNextInterstitial = false else Ads.showInterstitial(this)
+        }
+    }
+
+    /** While the UI has a menu or sheet open, Back closes that instead of leaving the app. */
+    private val backToUi = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() = send(UiJson.back())
+    }
+
+    /** This build talks to a portal and the installed profile is the app's own registration. */
+    private val accountAvailable: Boolean get() = Portal.configured && profile?.enrolled == true
 
     private val vpnConsent = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == RESULT_OK) {
@@ -113,6 +147,7 @@ class MainActivity : AppCompatActivity() {
         val view = createWebView()
         web = view
         setContentView(view)
+        onBackPressedDispatcher.addCallback(this, backToUi)
         // The page draws behind the system bars; tell it how much space they take (in CSS px = dp).
         ViewCompat.setOnApplyWindowInsetsListener(view) { _, ins ->
             val b = ins.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
@@ -133,6 +168,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         refreshPermission()   // consent can be revoked in Settings while we are in the background
+        if (accountAvailable && uiReady) refreshAccount()   // e.g. back from the payment page
     }
 
     override fun onStop() {
@@ -142,6 +178,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        billing?.end()
+        billing = null
         io.shutdown()
         port = null
         web?.destroy()
@@ -230,6 +268,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun notice(ok: Boolean, title: String, text: String) = send(UiJson.notice(ok, title, text))
 
+    private fun pushAccount() =
+        send(UiJson.account(accountAvailable, shown(account), accountBusy, System.currentTimeMillis(), Portal.configured,
+            imports = !BuildConfig.PLAY_STORE, privacy = BuildConfig.PRIVACY_URL.isNotBlank()))
+
+    /** What the plan card shows: in the Play Store build, Google's plans and prices replace the portal's (Paddle). */
+    private fun shown(a: AccountInfo?): AccountInfo? = if (!BuildConfig.PLAY_STORE || a == null) a else
+        a.copy(payments = a.play && playPlans.isNotEmpty(), prices = PlayPlans.options(playPlans), priceLabel = "")
+
     private val trafficTick = object : Runnable {
         override fun run() {
             if (VpnStateStore.state.active && port != null) {
@@ -244,11 +290,16 @@ class MainActivity : AppCompatActivity() {
 
     // ------------------------------------------------------------------ commands from the UI
 
+    // Never log `raw`: sign-in commands carry the password the user typed.
     private fun onUiMessage(raw: String?) {
         when (UiJson.command(raw)) {
             "ready" -> {
+                backToUi.isEnabled = false   // a reloaded page has no overlay open
                 send(insets)
                 pushState()
+                pushAccount()
+                if (accountAvailable) refreshAccount()
+                else if (Portal.configured && profile == null && !importing) enroll(connectAfter = false)
                 // React has rendered into the DOM.  Lift the splash only once WebView says a frame with that
                 // content is ready to draw (VisualStateCallback), so the user never sees an empty window
                 // while the WebView's first frame is still being composited.
@@ -267,11 +318,311 @@ class MainActivity : AppCompatActivity() {
                 web?.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                 if (VpnStateStore.state.active) ShieldsVpnService.disconnect(this)
             }
-            "importProfile" -> chooseProfile()
+            "importProfile" -> if (!BuildConfig.PLAY_STORE) chooseProfile()   // Play build: registration only
             "removeProfile" -> removeProfile()
             "openPortal" -> openPortal()
             "openVpnSettings" -> openVpnSettings()
+            "refreshAccount" -> if (accountAvailable) refreshAccount()
+            "watchAd" -> watchAd()
+            "signIn" -> accountCall("signIn", "/api/v1/login", JSONObject()
+                .put("login", UiJson.field(raw, "login")).put("password", UiJson.field(raw, "password", 128))
+                .put("code", UiJson.field(raw, "code", 16)))
+            "signUp" -> accountCall("signUp", "/api/v1/signup", JSONObject()
+                .put("email", UiJson.field(raw, "email")).put("password", UiJson.field(raw, "password", 128)))
+            "verifyEmail" -> accountCall("verifyEmail", "/api/v1/signup/verify", JSONObject()
+                .put("email", UiJson.field(raw, "email")).put("code", UiJson.field(raw, "code", 16)))
+            "forgotPassword" -> accountCall("forgotPassword", "/api/v1/forgot", JSONObject()
+                .put("login", UiJson.field(raw, "login")))
+            "resetPassword" -> accountCall("resetPassword", "/api/v1/forgot/verify", JSONObject()
+                .put("login", UiJson.field(raw, "login")).put("code", UiJson.field(raw, "code", 16))
+                .put("password", UiJson.field(raw, "password", 128)))
+            "signOut" -> accountCall("signOut", "/api/v1/logout", JSONObject())
+            "goPro" -> goPro(UiJson.field(raw, "period", 8))
+            "manageSubscription" -> manageSubscription()
+            "deleteAccount" -> accountCall("deleteAccount", "/api/v1/account/delete", JSONObject()
+                .put("password", UiJson.field(raw, "password", 128)).put("code", UiJson.field(raw, "code", 16)))
+            "openPrivacy" -> BuildConfig.PRIVACY_URL.takeIf { it.startsWith("https://") }
+                ?.let { openUrl(it, getString(R.string.privacy_policy)) }
+            "overlay" -> backToUi.isEnabled = UiJson.flag(raw, "open")
             else -> Log.w(TAG, "ignored an unknown message from the UI")
+        }
+    }
+
+    // ------------------------------------------------------------------ Free with ads / sign-in / Pro
+
+    /**
+     * A portal build registers this phone (no account; Free plan): by itself when the app first opens, and again on
+     * Connect if that did not work.  A tap on Connect while the registration runs connects as soon as it is done.
+     */
+    private fun enroll(connectAfter: Boolean) {
+        if (connectAfter) connectAfterEnroll = true
+        if (enrolling) return
+        enrolling = true
+        accountBusy = true
+        pushAccount()
+        io.execute {
+            val outcome = runCatching { Portal.enroll(applicationContext) }
+            main.post {
+                enrolling = false
+                accountBusy = false
+                val connect = connectAfterEnroll
+                connectAfterEnroll = false
+                outcome.onSuccess { (summary, me) ->
+                    profile = summary
+                    if (me != null) updateAccount(me)
+                    pushState()
+                    if (connect) onConnect()
+                }.onFailure { e ->
+                    val msg = if (e is PortalException) e.message ?: "" else Redact.pythonError(e)
+                    Log.w(TAG, "registration failed: ${Redact.text(msg)}")
+                    // Opening the app offline is normal: only a tap on Connect deserves an error dialog.
+                    if (connect) notice(false, getString(R.string.register_failed), msg)
+                }
+                pushAccount()
+            }
+        }
+    }
+
+    private fun refreshAccount() {
+        io.execute {
+            val outcome = runCatching { Portal.call(applicationContext, "GET", "/api/v1/me") }
+            main.post {
+                outcome.onSuccess { updateAccount(it) }
+                    .onFailure { Log.i(TAG, "account status unavailable: ${Redact.text(it.message)}") }
+            }
+        }
+    }
+
+    private fun updateAccount(me: JSONObject) {
+        val a = AccountInfo.fromMe(me, System.currentTimeMillis() / 1000)
+        account = a
+        pushAccount()
+        if (VpnStateStore.state.active) ShieldsVpnService.updateFreeTime(this, a.stopAtMs())
+        if (a.renewCertificate && !VpnStateStore.state.active) renewCertificate()
+        if (BuildConfig.PLAY_STORE && a.play) startPlay(a)
+    }
+
+    // ------------------------------------------------------------------ Google Play Billing (Play Store build)
+
+    /** Loads the Play plans once per product and, once signed in, re-sends Google's purchases to the portal. */
+    private fun startPlay(a: AccountInfo) {
+        val b = billing ?: PlayBilling(this) { purchases -> main.post { onPlayPurchases(purchases, notify = true) } }
+            .also { billing = it }
+        if (playLoadedFor != a.playProduct) {
+            playLoadedFor = a.playProduct
+            b.loadPlans(a.playProduct) { plans -> main.post { playPlans = plans; pushAccount() } }
+        }
+        if (a.signedIn && a.playAccount.isNotEmpty() && !playRestored) {
+            playRestored = true
+            b.restore { purchases -> main.post { onPlayPurchases(purchases, notify = false) } }
+        }
+    }
+
+    private fun onPlayPurchases(purchases: List<Purchase>, notify: Boolean) {
+        val product = account?.playProduct ?: return
+        for (p in purchases.filter { product in it.products }) {
+            when (p.purchaseState) {
+                Purchase.PurchaseState.PURCHASED -> verifyPlay(product, p.purchaseToken, notify)
+                Purchase.PurchaseState.PENDING -> if (notify) {
+                    notice(false, getString(R.string.go_pro), getString(R.string.play_pending))
+                }
+                else -> {}
+            }
+        }
+    }
+
+    /** The portal checks the purchase with Google, acknowledges it and turns Pro on (pqvpn/portal/play.py). */
+    private fun verifyPlay(product: String, token: String, notify: Boolean) {
+        io.execute {
+            val outcome = runCatching {
+                Portal.call(applicationContext, "POST", "/api/v1/play/verify",
+                    JSONObject().put("product_id", product).put("purchase_token", token))
+            }
+            main.post {
+                outcome.onSuccess { me ->
+                    updateAccount(me)
+                    if (notify && account?.pro == true) notice(true, getString(R.string.go_pro), getString(R.string.play_done))
+                }.onFailure { e ->
+                    Log.w(TAG, "Play purchase check failed: ${Redact.text(e.message)}")
+                    if (notify) notice(false, getString(R.string.go_pro), e.message ?: Redact.pythonError(e))
+                }
+            }
+        }
+    }
+
+    private fun manageSubscription() {
+        val a = account ?: return
+        if (BuildConfig.PLAY_STORE) {
+            // Google Play's own subscription page: cancel, change plan, payment method.
+            openUrl("https://play.google.com/store/account/subscriptions?sku=${Uri.encode(a.playProduct)}" +
+                "&package=${Uri.encode(packageName)}", getString(R.string.go_pro))
+        } else {
+            openFromPortal("manageSubscription", "/api/v1/manage")
+        }
+    }
+
+    private fun renewCertificate() {
+        io.execute {
+            val outcome = runCatching { Portal.renew(applicationContext) }
+            main.post {
+                outcome.onSuccess { profile = it; pushState() }
+                    .onFailure { Log.w(TAG, "certificate renewal failed: ${Redact.text(it.message)}") }
+            }
+        }
+    }
+
+    /** A sign-in / sign-up / reset step.  Answers that are a device status (`/me` shape) update the plan card. */
+    private fun accountCall(op: String, path: String, body: JSONObject) {
+        if (!accountAvailable) return
+        accountBusy = true
+        pushAccount()
+        io.execute {
+            val outcome = runCatching { Portal.call(applicationContext, "POST", path, body) }
+            main.post {
+                accountBusy = false
+                outcome.onSuccess { data ->
+                    if (op == "deleteAccount" || op == "signOut") playRestored = false
+                    if (data.has("plan")) updateAccount(data) else pushAccount()
+                    send(UiJson.accountResult(op, true))
+                }.onFailure { e ->
+                    pushAccount()
+                    val code = (e as? PortalException)?.code ?: "error"
+                    send(UiJson.accountResult(op, false, code, e.message ?: Redact.pythonError(e)))
+                }
+            }
+        }
+    }
+
+    /**
+     * Free time: one rewarded video.  Google's signed callback to the portal grants the time (see Ads).
+     * [connectAfter]: the user tapped Connect with no time left; connect as soon as the time is granted.
+     */
+    private fun watchAd(connectAfter: Boolean = false) {
+        val a = account
+        val name = profile?.account ?: return
+        if (!accountAvailable || a == null || accountBusy) return
+        if (!a.admob) {
+            notice(false, getString(R.string.free_time_title), "Free time from ads is not available right now.")
+            return
+        }
+        accountBusy = true
+        pushAccount()
+        io.execute {
+            val start = runCatching {
+                Portal.call(applicationContext, "POST", "/api/v1/reward/start", JSONObject().put("kind", "admob"))
+            }
+            main.post {
+                start.onFailure { e ->
+                    accountBusy = false
+                    pushAccount()
+                    notice(false, getString(R.string.free_time_title), e.message ?: Redact.pythonError(e))
+                }.onSuccess { r ->
+                    val nonce = r.getString("nonce")
+                    Ads.showRewarded(this, nonce, name) { earned, error ->
+                        if (!earned) {
+                            accountBusy = false
+                            pushAccount()
+                            notice(false, getString(R.string.free_time_title),
+                                error ?: "Watch the whole ad to get free time.")
+                        } else {
+                            collectReward(nonce, a.freeUntil, a.admobVerified, connectAfter)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /** After a watched ad: test mode claims directly; normally wait for Google's callback to reach the portal. */
+    private fun collectReward(nonce: String, before: Long, verified: Boolean, connectAfter: Boolean) {
+        io.execute {
+            var me: JSONObject? = null
+            if (!verified) {
+                me = runCatching {
+                    Portal.call(applicationContext, "POST", "/api/v1/reward/claim", JSONObject().put("nonce", nonce))
+                }.getOrNull()
+            } else {
+                for (attempt in 0 until 10) {   // Google usually calls back within a few seconds
+                    Thread.sleep(2000)
+                    val m = runCatching { Portal.call(applicationContext, "GET", "/api/v1/me") }.getOrNull()
+                    if (m != null && m.optLong("free_until") > before) {
+                        me = m
+                        break
+                    }
+                }
+            }
+            main.post {
+                accountBusy = false
+                if (me != null) {
+                    updateAccount(me)
+                    if (connectAfter && account?.let { it.pro || it.freeSecondsLeft(System.currentTimeMillis() / 1000) > 0 } == true) {
+                        skipNextInterstitial = true   // they just watched an ad for this connection
+                        onConnect()
+                    } else {
+                        notice(true, getString(R.string.free_time_title),
+                            "You have ${account?.freeMinutes ?: 30} more minutes. Tap Connect to use them.")
+                    }
+                } else {
+                    pushAccount()
+                    notice(false, getString(R.string.free_time_title), getString(R.string.ad_not_confirmed))
+                    refreshAccount()
+                }
+            }
+        }
+    }
+
+    /** [period] is the Pro plan the user tapped ("week", "month", "year"); "" = the portal's default plan. */
+    private fun goPro(period: String) {
+        val a = account ?: return
+        when {
+            !accountAvailable -> return
+            !a.accounts -> notice(false, getString(R.string.go_pro), "Pro is not available yet.")
+            !a.signedIn -> send(UiJson.accountResult("goPro", false, "sign_in_required",
+                "Pro is tied to your account: sign in or create one first."))
+            BuildConfig.PLAY_STORE -> {
+                // Play's payments policy: Pro is sold only through Google Play Billing in this build.
+                val plan = playPlans.firstOrNull { it.period == period } ?: playPlans.firstOrNull()
+                val b = billing
+                if (!a.play || a.playAccount.isEmpty() || plan == null || b == null || !b.buy(this, plan, a.playAccount)) {
+                    notice(false, getString(R.string.go_pro), "Google Play purchases are not available right now.")
+                }
+            }
+            !a.payments -> notice(false, getString(R.string.go_pro), "Payments are not available yet.")
+            // Only a plan the portal offered goes out; the portal checks it again anyway.
+            else -> openFromPortal("goPro", "/api/v1/checkout",
+                if (a.prices.any { it.period == period }) JSONObject().put("period", period) else JSONObject())
+        }
+    }
+
+    /** Asks the portal for a one-time link (checkout, subscription management) and opens it in the browser. */
+    private fun openFromPortal(op: String, path: String, body: JSONObject = JSONObject()) {
+        if (!accountAvailable || accountBusy) return
+        accountBusy = true
+        pushAccount()
+        io.execute {
+            val outcome = runCatching { Portal.call(applicationContext, "POST", path, body) }
+            main.post {
+                accountBusy = false
+                pushAccount()
+                outcome.onSuccess { data ->
+                    val url = data.optString("url")
+                    if (url.startsWith("https://") || (BuildConfig.PORTAL_ALLOW_HTTP && url.startsWith("http://"))) {
+                        openUrl(url, getString(R.string.go_pro))
+                    }
+                    send(UiJson.accountResult(op, true))
+                }.onFailure { e ->
+                    send(UiJson.accountResult(op, false, (e as? PortalException)?.code ?: "error",
+                        e.message ?: Redact.pythonError(e)))
+                }
+            }
+        }
+    }
+
+    private fun openUrl(url: String, title: String) {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE))
+        } catch (e: ActivityNotFoundException) {
+            notice(false, title, getString(R.string.no_browser))
         }
     }
 
@@ -282,9 +633,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun onConnect() {
         val s = VpnStateStore.state
+        val a = account
         when {
             s.active || s.phase == Phase.DISCONNECTING -> return
-            profile == null -> chooseProfile()
+            profile == null -> if (Portal.configured) enroll(connectAfter = true) else chooseProfile()
+            // Free with no time left: the server would refuse the handshake.  The screen said "a short ad gives you
+            // free minutes", so the tap plays it and connects afterwards; without ads left, explain instead.
+            accountAvailable && a != null && !a.pro && a.freeSecondsLeft(System.currentTimeMillis() / 1000) <= 0 ->
+                if (a.adBeforeConnect(System.currentTimeMillis() / 1000)) watchAd(connectAfter = true)
+                else notice(false, getString(R.string.free_time_title), getString(R.string.no_free_time, a.freeMinutes))
             Build.VERSION.SDK_INT >= 33 && !askedForNotifications &&
                 ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED -> {
                 askedForNotifications = true
@@ -306,7 +663,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun startVpn() {
         VpnStateStore.update { VpnUiState(Phase.PREPARING, active = true) }
-        ShieldsVpnService.connect(this)
+        val a = account
+        ShieldsVpnService.connect(this, if (accountAvailable && a != null) a.stopAtMs() else 0L)
     }
 
     private fun chooseProfile() {
@@ -347,6 +705,8 @@ class MainActivity : AppCompatActivity() {
             ProfileStore.remove(applicationContext)
             main.post {
                 profile = null
+                account = null
+                pushAccount()
                 VpnStateStore.update { VpnUiState() }
                 notice(true, getString(R.string.remove_profile), getString(R.string.profile_removed))
             }
@@ -364,10 +724,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun openPortal() {
         val url = profile?.portalUrl?.takeIf { it.startsWith("https://") || it.startsWith("http://") } ?: return
-        try {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE))
-        } catch (e: ActivityNotFoundException) {
-            notice(false, getString(R.string.open_portal), getString(R.string.no_browser))
-        }
+        openUrl(url, getString(R.string.open_portal))
     }
 }

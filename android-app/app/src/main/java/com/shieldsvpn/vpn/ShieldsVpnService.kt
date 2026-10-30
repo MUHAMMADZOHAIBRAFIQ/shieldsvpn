@@ -33,10 +33,20 @@ class ShieldsVpnService : VpnService() {
     companion object {
         const val ACTION_CONNECT = "com.shieldsvpn.vpn.action.CONNECT"
         const val ACTION_DISCONNECT = "com.shieldsvpn.vpn.action.DISCONNECT"
+        const val ACTION_FREE_TIME = "com.shieldsvpn.vpn.action.FREE_TIME"
+        /** Wall-clock ms when Free time ends; 0 = no limit (Pro, or an imported profile). */
+        const val EXTRA_STOP_AT = "stop_at_ms"
         private const val TAG = "ShieldsVpnService"
 
-        fun connect(ctx: Context) {
-            ctx.startService(Intent(ctx, ShieldsVpnService::class.java).setAction(ACTION_CONNECT))
+        fun connect(ctx: Context, stopAtMs: Long = 0) {
+            ctx.startService(Intent(ctx, ShieldsVpnService::class.java).setAction(ACTION_CONNECT)
+                .putExtra(EXTRA_STOP_AT, stopAtMs))
+        }
+
+        /** Free time changed while connected (another ad watched, or the account became Pro). */
+        fun updateFreeTime(ctx: Context, stopAtMs: Long) {
+            ctx.startService(Intent(ctx, ShieldsVpnService::class.java).setAction(ACTION_FREE_TIME)
+                .putExtra(EXTRA_STOP_AT, stopAtMs))
         }
 
         fun disconnect(ctx: Context) {
@@ -60,6 +70,24 @@ class ShieldsVpnService : VpnService() {
     private var lastPhysicalNetwork: Network? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private val stateListener: (VpnUiState) -> Unit = { s -> if (worker != null) Notifications.update(this, s) }
+    /**
+     * Free plan: end the session ourselves when the free time runs out, with a clear message.  The VPN server
+     * enforces the same limit (it drops the session and refuses new handshakes), so this is only for a clean,
+     * honest stop instead of an endless "Reconnecting".
+     */
+    private var freeTimeEnded = false
+    private val freeTimeUp = Runnable {
+        if (worker != null && !stopRequested) {
+            Log.i(TAG, "free time is over; disconnecting")
+            freeTimeEnded = true
+            requestStop()
+        }
+    }
+
+    private fun scheduleFreeTime(stopAtMs: Long) {
+        main.removeCallbacks(freeTimeUp)
+        if (stopAtMs > 0) main.postDelayed(freeTimeUp, maxOf(0L, stopAtMs - System.currentTimeMillis()))
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -68,7 +96,13 @@ class ShieldsVpnService : VpnService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_CONNECT -> startSession()
+            ACTION_CONNECT -> {
+                startSession()
+                if (worker != null) scheduleFreeTime(intent.getLongExtra(EXTRA_STOP_AT, 0))
+            }
+            ACTION_FREE_TIME -> {
+                if (worker != null) scheduleFreeTime(intent.getLongExtra(EXTRA_STOP_AT, 0)) else stopSelf()
+            }
             ACTION_DISCONNECT -> requestStop()
             // Android's always-on VPN starts the service with the VpnService interface action (at boot, after
             // the process died, or when the user enables it).  Connect if a profile is installed; otherwise
@@ -102,6 +136,7 @@ class ShieldsVpnService : VpnService() {
         }
         stopRequested = false
         pendingConnect = false
+        freeTimeEnded = false
         val (alwaysOn, lockdown) = systemVpnMode()
         VpnStateStore.update { VpnUiState(Phase.PREPARING, active = true, alwaysOn = alwaysOn, lockdown = lockdown) }
         try {
@@ -173,13 +208,18 @@ class ShieldsVpnService : VpnService() {
 
     private fun finishSession(error: String) {
         unregisterNetworkCallback()
+        main.removeCallbacks(freeTimeUp)
         worker = null
         if (pendingConnect) {
             Log.i(TAG, "previous session closed; starting the queued connection")
             startSession()
             return
         }
-        VpnStateStore.update { StateMapper.finished(it, error, stopRequested) }
+        if (freeTimeEnded) {
+            VpnStateStore.update { VpnUiState(Phase.ERROR, message = getString(R.string.free_time_ended)) }
+        } else {
+            VpnStateStore.update { StateMapper.finished(it, error, stopRequested) }
+        }
         stopForegroundCompat()
         stopSelf()
     }

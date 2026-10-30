@@ -23,9 +23,12 @@ data class ProfileSummary(
     val keyAlg: String = "",
     /** Certificate serial (hex); binds the encrypted secrets to this profile. */
     val serial: String = "",
+    /** Registered by the app itself with the portal (Free with ads / Pro), not imported from a ZIP. */
+    val enrolled: Boolean = false,
 ) {
     companion object {
         fun fromJson(o: JSONObject) = ProfileSummary(
+            enrolled = o.optBoolean("enrolled"),
             account = o.optString("account"),
             server = o.optString("server"),
             serverName = o.optString("server_name"),
@@ -40,14 +43,20 @@ data class ProfileSummary(
     }
 }
 
-class ProfileSecrets(val keyPem: String, val psk: String)
+/** The sealed parts of a profile.  [token] is the device's bearer token for the portal API (enrolled only). */
+class ProfileSecrets(val keyPem: String, val psk: String, val token: String = "")
 
 /**
  * The installed VPN profile.
  *
  * Layout (all app-private, excluded from backups):
  *   files/profile/            client.toml (without psk_file), <user>.crt, ca.crt, summary.json
- *   no_backup/profile.secrets private key + PSK, AES-256-GCM under an Android Keystore key (SecretBox)
+ *   no_backup/profile.secrets private key + PSK (+ the portal device token for an app-enrolled profile),
+ *                             AES-256-GCM under an Android Keystore key (SecretBox)
+ *
+ * A profile is either imported from a portal ZIP or *enrolled*: the app registered itself with the portal
+ * (Portal.enroll), Python wrote the same public files from the portal's answer, and the key, PSK and token
+ * are sealed exactly like an imported profile's.
  *
  * Profiles are the ZIP files the portal already issues ("Download VPN profile").  Python validates them
  * (pqvpn.android_client.import_profile): the certificate must chain to the bundled CA, be a client
@@ -90,6 +99,19 @@ object ProfileStore {
         } finally {
             staging.deleteRecursively()
         }
+    }
+
+    /**
+     * Installs a profile that Python already wrote into [staging] from the portal's enrollment (or renewal)
+     * answer: `result` is enroll_json/renew_json output, [token] the device token to keep sealed with the key.
+     */
+    fun installEnrolled(ctx: Context, staging: File, result: JSONObject, token: String): ProfileSummary {
+        val summary = result.getJSONObject("summary")
+        val secrets = result.getJSONObject("secrets").put("serial", summary.optString("serial")).put("token", token)
+        val sealed = SecretBox.seal(secrets.toString().toByteArray(Charsets.UTF_8))
+        File(staging, SUMMARY).writeText(summary.toString())
+        install(ctx, staging, sealed)
+        return ProfileSummary.fromJson(summary)
     }
 
     private fun install(ctx: Context, staging: File, sealedSecrets: ByteArray) = synchronized(lock) {
@@ -144,7 +166,7 @@ object ProfileStore {
                     "import was interrupted). Import the profile again.")
             }
         }
-        ProfileSecrets(o.getString("key_pem"), o.optString("psk", ""))
+        ProfileSecrets(o.getString("key_pem"), o.optString("psk", ""), o.optString("token", ""))
     }
 
     fun remove(ctx: Context) = synchronized(lock) {

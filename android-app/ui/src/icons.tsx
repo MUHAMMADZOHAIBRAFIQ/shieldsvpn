@@ -76,3 +76,30 @@ export const IconAlert = () => (
 export const IconCheck = () => (
   <Svg><circle cx="12" cy="12" r="9" /><path d="m8 12 3 3 5-6" /></Svg>
 )
+export const IconMenu = () => (
+  <Svg size={22}><path d="M4 7h16M4 12h16M4 17h10" /></Svg>
+)
+export const IconClose = () => (
+  <Svg><path d="M6 6l12 12M18 6 6 18" /></Svg>
+)
+export const IconCrown = () => (
+  <Svg><path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5Z" /><path d="M5 19h14" /></Svg>
+)
+export const IconUser = () => (
+  <Svg><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></Svg>
+)
+export const IconLogout = () => (
+  <Svg><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3" /><path d="M10 16l-4-4 4-4M6 12h10" /></Svg>
+)
+export const IconShieldCheck = () => (
+  <Svg><path d="M12 3 4.5 6v5.5c0 4.6 3.1 8.2 7.5 9.5 4.4-1.3 7.5-4.9 7.5-9.5V6Z" /><path d="m8.8 12 2.2 2.2 4.2-4.4" /></Svg>
+)
+export const IconDoc = () => (
+  <Svg><path d="M7 3h7l5 5v13H7Z" /><path d="M14 3v5h5M10 13h6M10 17h6" /></Svg>
+)
+export const IconPlay = () => (
+  <Svg size={16}><circle cx="12" cy="12" r="9" /><path d="M10 8.5v7l6-3.5Z" /></Svg>
+)
+export const IconTick = () => (
+  <Svg size={18}><path d="m5 12.5 4.5 4.5L19 7.5" /></Svg>
+)

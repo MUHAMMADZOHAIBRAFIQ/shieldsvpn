@@ -61,6 +61,18 @@ class UiJsonTest {
     }
 
     @Test
+    fun overlayFlagAndBack() {
+        assertEquals("overlay", UiJson.command("""{"type":"overlay","open":true}"""))
+        assertTrue(UiJson.flag("""{"type":"overlay","open":true}""", "open"))
+        assertFalse(UiJson.flag("""{"type":"overlay","open":false}""", "open"))
+        assertFalse(UiJson.flag("""{"type":"overlay","open":"true"}""", "open"))  // only a JSON true counts
+        assertFalse(UiJson.flag("""{"type":"overlay"}""", "open"))
+        assertFalse(UiJson.flag("not json", "open"))
+        assertFalse(UiJson.flag(null, "open"))
+        assertEquals("""{"type":"back"}""", UiJson.back().toString())
+    }
+
+    @Test
     fun trafficAndNotices() {
         val t = UiJson.traffic("""{"rx_bytes": 1234, "tx_bytes": 56, "rx_packets": 3, "tx_packets": 2}""", 99)!!
         assertEquals(1234L, t.getLong("rx"))
