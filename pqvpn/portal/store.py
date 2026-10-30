@@ -391,6 +391,10 @@ class Store:
     def purge_rewards(self, older_than: int) -> None:
         self._exec("DELETE FROM reward_grants WHERE created_at < ?", (int(time.time()) - older_than,))
 
+    def purge_audit(self, older_than: int) -> int:
+        """Forget security-log entries older than ``older_than`` seconds (the privacy policy promises 12 months)."""
+        return self._exec("DELETE FROM audit WHERE ts < ?", (int(time.time()) - older_than,))
+
     # -------------------------------------------------------------- payments (payments.py)
     def create_pay_link(self, code_hash: str, user_id: int, txn_id: str, ttl: int) -> None:
         now = int(time.time())

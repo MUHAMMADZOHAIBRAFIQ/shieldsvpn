@@ -41,6 +41,17 @@ class TestAccountIdsAreNeverReused(unittest.TestCase):
         self.assertEqual(len({a, b, c, d}), 4)
 
 
+class TestSecurityLogRetention(unittest.TestCase):
+    def test_entries_older_than_a_year_are_forgotten(self):
+        from pqvpn.portal import access
+        s = Store(os.path.join(tempfile.mkdtemp(prefix="pqvpn-audit-"), "t.db"))
+        s.audit("login_ok", actor="old")
+        s.audit("login_ok", actor="recent")
+        s._exec("UPDATE audit SET ts = ? WHERE actor = 'old'", (int(time.time()) - access.AUDIT_RETENTION - 60,))
+        self.assertEqual(s.purge_audit(access.AUDIT_RETENTION), 1)
+        self.assertEqual([r["actor"] for r in s.audit_after(0, 10)], ["recent"])
+
+
 class TestPortalFixes(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

@@ -26,6 +26,8 @@ from .store import Store
 
 log = logging.getLogger("pqvpn.portal")
 
+AUDIT_RETENTION = 365 * 86400  # security log kept 12 months (public/privacy.html says so)
+
 
 class PortalAccess:
     INTERVAL = 2.0
@@ -110,6 +112,7 @@ class PortalAccess:
                 if (n := self.store.purge_anonymous_devices(days * 86400)):
                     log.info("forgot %d anonymous device(s) unseen for %d days", n, days)
                 self.store.purge_rewards(7 * 86400)
+                self.store.purge_audit(AUDIT_RETENTION)
         except sqlite3.Error as exc:
             log.warning("portal database: %s", exc)
             return []
