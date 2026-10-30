@@ -18,7 +18,12 @@ object UiJson {
         "deleteAccount", "openPrivacy",
         // A menu or sheet is open ({open: true}): Android's Back closes it (a "back" message) instead of the app.
         "overlay",
+        // The User Agreement, accepted once per installation before anything else runs (Terms.kt).
+        "acceptTerms", "declineTerms",
     )
+
+    /** Commands that work before the User Agreement is accepted; everything else waits for it. */
+    val BEFORE_TERMS = setOf("ready", "acceptTerms", "declineTerms", "overlay", "openPrivacy")
 
     fun command(raw: String?): String? {
         if (raw == null || raw.length > 4096) return null
@@ -41,6 +46,10 @@ object UiJson {
 
     /** Back was pressed while the UI had an overlay open: it closes the top-most one. */
     fun back(): JSONObject = JSONObject().put("type", "back")
+
+    /** Whether this installation accepted the User Agreement, and which version the UI must show and echo. */
+    fun terms(accepted: Boolean, version: String): JSONObject =
+        JSONObject().put("type", "terms").put("accepted", accepted).put("version", version)
 
     /**
      * The plan card: what the portal says about this device.  [available] = this build talks to a portal and

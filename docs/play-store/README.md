@@ -50,8 +50,10 @@ the VPN server must be public, correct and switched on:
   key (see step 3), *Sell Pro in the Play app* on.
 - [ ] A **reviewer account**: create a user with plan *Premium* and no end date, an email address and no 2FA, for
   App access (see [APP_CONTENT.md](APP_CONTENT.md)).
-- [ ] Publish the website pages `public/privacy.html` and `public/delete-account.html` (Vercel) after filling in every
-  `[…]` placeholder. Their URLs go into the build and into Play Console.
+- [x] Website pages filled in for **Dua Software Studio** (contact `muhammadzohaibrafiq2@gmail.com`):
+  `public/privacy.html`, `public/delete-account.html` and the User Agreement `public/terms.html`, published at
+  `https://shieldsvpn.vercel.app/`. Their URLs go into the build and into Play Console. The app shows the same
+  User Agreement once per installation and must be accepted before it registers or connects.
 
 ## 2. Build the signed bundle
 
@@ -71,7 +73,7 @@ Signing).
    store=play
    portalUrl=https://YOUR-PORTAL-DOMAIN/
    # portalPin only for a self-signed portal certificate
-   privacyPolicyUrl=https://YOUR-SITE/privacy.html
+   privacyPolicyUrl=https://shieldsvpn.vercel.app/privacy.html
    admobAppId=ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY
    admobRewardedId=ca-app-pub-XXXXXXXXXXXXXXXX/ZZZZZZZZZZ
    admobInterstitialId=ca-app-pub-XXXXXXXXXXXXXXXX/WWWWWWWWWW

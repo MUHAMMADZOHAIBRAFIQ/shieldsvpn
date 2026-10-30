@@ -187,6 +187,9 @@ Verified:
   Kali portal (normal certificate checks, no pin) registered on the emulator, played the test ad, and connected to
   the Kali VPN server through playit.gg in full-tunnel mode; pings to the server (10.8.0.1) and to 1.1.1.1 went
   through the tunnel. Web browsing and DNS-leak checks were not run.
+- 2026-10-31, User Agreement (API 36 emulator): a fresh install shows it before anything else; Decline closes the
+  app and it asks again on the next start; after Agree it does not return on later starts, and after uninstall and
+  reinstall it is shown again. The ☰ menu's *User agreement* opens it read-only.
 
 Not verified:
 

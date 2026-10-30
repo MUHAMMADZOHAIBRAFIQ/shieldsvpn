@@ -35,7 +35,8 @@ export function proEntry(a: Account, hasProfile: boolean): ProEntry {
     return { title: 'ShieldsVPN Pro', detail: until, action: a.payments ? 'manage' : 'none', active: true }
   }
   if (!a.available) {
-    if (a.portal && !hasProfile) return offer(a.busy ? 'Setting up this phone…' : 'Tap Connect once to set up this phone', 'none')
+    if (!a.portal) return offer('Not available in this version of the app', 'none')   // profile-file builds
+    if (!hasProfile) return offer(a.busy ? 'Setting up this phone…' : 'Tap Connect once to set up this phone', 'none')
     return offer('Not available with an imported profile', 'none')
   }
   if (!a.known) return offer(a.busy ? 'Checking your plan…' : 'Waiting for the server', 'none')
@@ -63,6 +64,8 @@ export interface MenuProps {
   onImport: () => void
   onVpnSettings: () => void
   onPrivacy: () => void
+  /** Shows the User Agreement (read only). */
+  onTerms?: () => void
 }
 
 /** The side menu behind the ☰ button: Pro first, then the account, the Android settings and the policies. */
@@ -130,6 +133,11 @@ export function Menu(props: MenuProps) {
             <MenuItem icon={<IconImport />} label="Import a profile file" detail="From your ShieldsVPN portal"
               disabled={props.locked} onClick={run(props.onImport)} />
           )}
+        </section>
+
+        <section className="menu__section" aria-label="About">
+          <h3>About</h3>
+          {props.onTerms && <MenuItem icon={<IconDoc />} label="User agreement" onClick={run(props.onTerms)} />}
           {a.privacy && <MenuItem icon={<IconDoc />} label="Privacy policy" onClick={run(props.onPrivacy)} />}
         </section>
 

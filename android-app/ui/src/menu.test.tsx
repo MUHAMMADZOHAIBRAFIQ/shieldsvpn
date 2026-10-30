@@ -44,6 +44,8 @@ describe('proEntry', () => {
       .toMatchObject({ action: 'none', detail: 'Tap Connect once to set up this phone' })
     expect(proEntry({ ...noAccount, portal: true, busy: true }, false).detail).toBe('Setting up this phone…')
     expect(proEntry({ ...free, available: false }, true).detail).toBe('Not available with an imported profile')
+    expect(proEntry(noAccount, false).detail).toBe('Not available in this version of the app')
+    expect(proEntry(noAccount, true).detail).toBe('Not available in this version of the app')
     expect(proEntry({ ...free, known: false }, true).action).toBe('none')
     expect(proEntry({ ...free, accounts: false }, true)).toMatchObject({ action: 'none', detail: 'Coming soon' })
   })

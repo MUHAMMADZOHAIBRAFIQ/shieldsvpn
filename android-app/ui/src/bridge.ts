@@ -10,10 +10,12 @@
  *                  'signOut', 'goPro' {period}, 'manageSubscription', 'refreshAccount',
  *                  'deleteAccount' {password, code}, 'openPrivacy'
  *                | { type: 'overlay', open }  (a menu or sheet is open: Android's Back closes it instead of the app)
+ *                | { type: 'acceptTerms', version } | { type: 'declineTerms' }  (the User Agreement, terms.ts)
  *   app -> UI  : { type: 'state', state } | { type: 'traffic', rx, tx, at } | { type: 'notice', ... }
  *                | { type: 'insets', top, bottom, left, right }
  *                | { type: 'account', account } | { type: 'accountResult', op, ok, code, message }
  *                | { type: 'back' }  (Back was pressed while an overlay was open)
+ *                | { type: 'terms', accepted, version }  (whether this installation accepted the User Agreement)
  *
  * The UI never sees keys, certificates or tokens: the app sends display data only.  (What the user types into
  * the sign-in forms goes the other way, to the app, which sends it to the portal over TLS.)
@@ -154,6 +156,7 @@ export type Inbound =
   | { type: 'account'; account: Account }
   | ({ type: 'accountResult' } & AccountResult)
   | { type: 'back' }
+  | { type: 'terms'; accepted: boolean; version: string }
 
 export type Outbound =
   | {
@@ -162,6 +165,8 @@ export type Outbound =
     }
   | { type: 'goPro'; period: Period | '' }
   | { type: 'overlay'; open: boolean }
+  | { type: 'acceptTerms'; version: string }
+  | { type: 'declineTerms' }
   | { type: 'deleteAccount'; password: string; code: string }
   | { type: 'signIn'; login: string; password: string; code: string }
   | { type: 'signUp'; email: string; password: string }
@@ -275,6 +280,10 @@ export function parseInbound(data: unknown): Inbound | null {
         : null
     case 'back':
       return { type: 'back' }
+    case 'terms':
+      return typeof m.accepted === 'boolean' && typeof m.version === 'string' && m.version.length <= 32
+        ? { type: 'terms', accepted: m.accepted, version: m.version }
+        : null
     default:
       return null
   }

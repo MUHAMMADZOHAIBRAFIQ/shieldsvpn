@@ -89,6 +89,13 @@ export function mockBridge(): Bridge {
       case 'ready':
         emit({ type: 'state', state })
         emit({ type: 'account', account })
+        emit({ type: 'terms', accepted: !fresh, version: '2026-10-31' })   // a fresh install asks first
+        break
+      case 'acceptTerms':
+        emit({ type: 'terms', accepted: true, version: msg.version })
+        break
+      case 'declineTerms':
+        emit({ type: 'notice', kind: 'error', title: 'Declined', text: 'The app closes when you decline.' })
         break
       case 'watchAd':
         busyThen(1500, () => {

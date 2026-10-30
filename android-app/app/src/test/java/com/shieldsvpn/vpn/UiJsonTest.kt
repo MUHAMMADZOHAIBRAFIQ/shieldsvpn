@@ -73,6 +73,24 @@ class UiJsonTest {
     }
 
     @Test
+    fun termsMessageAndWhatWorksBeforeAcceptance() {
+        val m = UiJson.terms(false, Terms.VERSION)
+        assertEquals("terms", m.getString("type"))
+        assertFalse(m.getBoolean("accepted"))
+        assertEquals(Terms.VERSION, m.getString("version"))
+        for (c in listOf("acceptTerms", "declineTerms")) assertEquals(c, UiJson.command("""{"type":"$c"}"""))
+        assertTrue("ready" in UiJson.BEFORE_TERMS)
+        assertTrue(UiJson.COMMANDS.containsAll(UiJson.BEFORE_TERMS))
+        for (c in listOf("connect", "importProfile", "watchAd", "signIn", "goPro")) assertFalse(c in UiJson.BEFORE_TERMS)
+        // Acceptance counts only for the current version of the agreement.
+        assertTrue(Terms.matches(Terms.VERSION))
+        assertTrue(Terms.matches(Terms.VERSION + "\n"))
+        assertFalse(Terms.matches("2026-01-01"))
+        assertFalse(Terms.matches(""))
+        assertFalse(Terms.matches(null))
+    }
+
+    @Test
     fun trafficAndNotices() {
         val t = UiJson.traffic("""{"rx_bytes": 1234, "tx_bytes": 56, "rx_packets": 3, "tx_packets": 2}""", 99)!!
         assertEquals(1234L, t.getLong("rx"))

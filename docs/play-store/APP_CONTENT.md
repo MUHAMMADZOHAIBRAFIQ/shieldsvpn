@@ -6,7 +6,7 @@ declaration is a policy violation in itself.
 
 ## Privacy policy
 
-`https://YOUR-SITE/privacy.html` (from `public/privacy.html`, with every `[…]` filled in). The same address is built
+`https://shieldsvpn.vercel.app/privacy.html` (from `public/privacy.html`, with every `[…]` filled in). The same address is built
 into the app (`privacyPolicyUrl`) and opened from the *Privacy policy* link at the bottom of the screen, as Google's
 User Data policy requires.
 
@@ -82,7 +82,7 @@ documents for apps holding VPN consent, `specialUse` is only a fallback for devi
 
 - In the app: Your plan → **Delete account** (password, plus the authenticator code if 2FA is on). Implemented by
   `POST /api/v1/account/delete`.
-- Web link for requests without the app: `https://YOUR-SITE/delete-account.html` (from `public/delete-account.html`).
+- Web link for requests without the app: `https://shieldsvpn.vercel.app/delete-account.html` (from `public/delete-account.html`).
 - Data deleted / kept: as listed on that page and in [DATA_SAFETY.md](DATA_SAFETY.md).
 
 ## Permissions the app requests (for reference)

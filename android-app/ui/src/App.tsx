@@ -1,5 +1,6 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { AccountSheet, ProSheet, type SheetMode } from './account'
+import { Agreement } from './agreement'
 import {
   type Account, type AccountResult, type Bridge, type Notice, type Traffic, type VpnState, initialState, noAccount,
 } from './bridge'
@@ -34,6 +35,9 @@ export function App({ bridge }: { bridge: Bridge }) {
   const [result, setResult] = useState<AccountResult | null>(null)
   const [menu, setMenu] = useState(false)
   const [proSheet, setProSheet] = useState(false)
+  /** The User Agreement: null until the app says whether this installation accepted it. */
+  const [terms, setTerms] = useState<{ accepted: boolean; version: string } | null>(null)
+  const [readTerms, setReadTerms] = useState(false)
   /** The user asked for Pro while signed out: once signed in, go straight on to the plan choice. */
   const proAfterSignIn = useRef(false)
   /** Android's Back closes the top-most overlay (set every render, so it always sees the current state). */
@@ -102,6 +106,9 @@ export function App({ bridge }: { bridge: Bridge }) {
         case 'back':
           closeTop.current()
           break
+        case 'terms':
+          setTerms({ accepted: msg.accepted, version: msg.version })
+          break
       }
     })
     bridge.send({ type: 'ready' })
@@ -109,7 +116,8 @@ export function App({ bridge }: { bridge: Bridge }) {
   }, [bridge])
 
   closeTop.current = () => {
-    if (notice) setNotice(null)
+    if (readTerms) setReadTerms(false)
+    else if (notice) setNotice(null)
     else if (confirmRemove) setConfirmRemove(false)
     else if (sheet) {
       proAfterSignIn.current = false
@@ -117,7 +125,9 @@ export function App({ bridge }: { bridge: Bridge }) {
     } else if (proSheet) setProSheet(false)
     else setMenu(false)
   }
-  const overlay = menu || proSheet || sheet !== null || confirmRemove || notice !== null
+  // The agreement that must be accepted is not an overlay: Back leaves the app there, as on any first screen.
+  const overlay = menu || proSheet || readTerms || sheet !== null || confirmRemove || notice !== null
+  const mustAccept = terms !== null && !terms.accepted
   useEffect(() => {
     bridge.send({ type: 'overlay', open: overlay })
   }, [bridge, overlay])
@@ -183,7 +193,16 @@ export function App({ bridge }: { bridge: Bridge }) {
           onDeleteAccount={() => openSheet('delete')}
           onImport={() => bridge.send({ type: 'importProfile' })}
           onVpnSettings={() => bridge.send({ type: 'openVpnSettings' })}
-          onPrivacy={() => bridge.send({ type: 'openPrivacy' })} />
+          onPrivacy={() => bridge.send({ type: 'openPrivacy' })}
+          onTerms={() => setReadTerms(true)} />
+      )}
+
+      {readTerms && <Agreement mode="read" onClose={() => setReadTerms(false)} />}
+
+      {mustAccept && terms && (
+        <Agreement mode="accept"
+          onAccept={() => bridge.send({ type: 'acceptTerms', version: terms.version })}
+          onDecline={() => bridge.send({ type: 'declineTerms' })} />
       )}
 
       {proSheet && (

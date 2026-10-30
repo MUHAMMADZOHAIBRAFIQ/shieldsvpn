@@ -60,7 +60,7 @@ in `browser-extension/manifest.json` for every upload.
 | Permission justification: `nativeMessaging` | Talks to the ShieldsVPN app installed on the same PC, which runs the VPN; no other way exists for an extension to control a desktop app. |
 | Remote code | None: all script is in the package. |
 | Data collection (Chrome privacy practices, Firefox `data_collection_permissions`) | None collected or transmitted by the extension. |
-| Privacy policy | `https://YOUR-SITE/privacy.html` |
+| Privacy policy | `https://shieldsvpn.vercel.app/privacy.html` |
 | Description | "Companion for the ShieldsVPN app on Windows: see whether the post-quantum VPN is connected, and connect or disconnect it in one click. Requires the ShieldsVPN Windows app." |
 | Screenshots | The popup in its connected and disconnected states (1280 × 800 for the Chrome Web Store). |
 

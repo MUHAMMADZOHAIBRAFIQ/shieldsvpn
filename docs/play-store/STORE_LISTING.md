@@ -50,7 +50,7 @@ MADE FOR ANDROID
 ABOUT THE VPN PERMISSION
 ShieldsVPN uses Android's VpnService to create an encrypted tunnel from your device to the ShieldsVPN server. This is the app's core function. The tunnel only carries your traffic to our server: the app does not read, collect or sell it, and does not block or change ads in other apps.
 
-Privacy policy: https://YOUR-SITE/privacy.html
+Privacy policy: https://shieldsvpn.vercel.app/privacy.html
 ```
 <!-- markdownlint-enable MD013 -->
 
@@ -60,9 +60,9 @@ Privacy policy: https://YOUR-SITE/privacy.html
 | --- | --- |
 | App category | Tools |
 | Tags | VPN, Privacy, Security (pick from Play's list) |
-| Contact email | [SUPPORT EMAIL] (shown publicly) |
-| Website | `https://YOUR-SITE/` |
-| Privacy policy | `https://YOUR-SITE/privacy.html` |
+| Contact email | `muhammadzohaibrafiq2@gmail.com` (shown publicly) |
+| Website | `https://shieldsvpn.vercel.app/` |
+| Privacy policy | `https://shieldsvpn.vercel.app/privacy.html` |
 | App icon | `graphics/icon-512.png` (512 × 512, 32-bit PNG) |
 | Feature graphic | `graphics/feature-graphic.png` (1024 × 500, PNG without transparency) |
 | Phone screenshots | 2–8, taken from the real app (see [README.md](README.md) step 4) |

@@ -12,7 +12,7 @@ in the form; they describe what the SDKs collect in their current versions.
 | --- | --- |
 | Does the app collect or share any of the required user data types? | Yes |
 | Is all collected data encrypted in transit? | Yes (HTTPS to the portal, the post-quantum VPN protocol to the server, Google's SDKs use TLS) |
-| Do you provide a way for users to request that their data is deleted? | Yes: in the app (Delete account) and at `https://YOUR-SITE/delete-account.html` |
+| Do you provide a way for users to request that their data is deleted? | Yes: in the app (Delete account) and at `https://shieldsvpn.vercel.app/delete-account.html` |
 
 ## Data types
 

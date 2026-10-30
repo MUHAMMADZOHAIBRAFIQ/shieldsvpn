@@ -84,6 +84,8 @@ class MainActivity : AppCompatActivity() {
     private var adShownFor = 0L
     /** The user just watched a rewarded ad to connect: no second (interstitial) ad for that connection. */
     private var skipNextInterstitial = false
+    /** This installation accepted the User Agreement (Terms.kt); until then nothing registers or connects. */
+    private var termsAccepted = false
     /** Google Play Billing (Play Store build only), and the subscription's plans with Google's prices. */
     private var billing: PlayBilling? = null
     private var playPlans: List<PlayPlan> = emptyList()
@@ -140,6 +142,7 @@ class MainActivity : AppCompatActivity() {
         )
         super.onCreate(savedInstanceState)
         profile = ProfileStore.summary(this)
+        termsAccepted = Terms.accepted(this)
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
             showWebViewTooOld()
             return
@@ -168,7 +171,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         refreshPermission()   // consent can be revoked in Settings while we are in the background
-        if (accountAvailable && uiReady) refreshAccount()   // e.g. back from the payment page
+        if (termsAccepted && accountAvailable && uiReady) refreshAccount()   // e.g. back from the payment page
     }
 
     override fun onStop() {
@@ -292,14 +295,19 @@ class MainActivity : AppCompatActivity() {
 
     // Never log `raw`: sign-in commands carry the password the user typed.
     private fun onUiMessage(raw: String?) {
-        when (UiJson.command(raw)) {
+        val command = UiJson.command(raw)
+        if (!termsAccepted && command != null && command !in UiJson.BEFORE_TERMS) {
+            Log.i(TAG, "ignored \"$command\": the User Agreement is not accepted yet")
+            return
+        }
+        when (command) {
             "ready" -> {
                 backToUi.isEnabled = false   // a reloaded page has no overlay open
                 send(insets)
+                send(UiJson.terms(termsAccepted, Terms.VERSION))
                 pushState()
                 pushAccount()
-                if (accountAvailable) refreshAccount()
-                else if (Portal.configured && profile == null && !importing) enroll(connectAfter = false)
+                if (termsAccepted) startAccount()
                 // React has rendered into the DOM.  Lift the splash only once WebView says a frame with that
                 // content is ready to draw (VisualStateCallback), so the user never sees an empty window
                 // while the WebView's first frame is still being composited.
@@ -344,8 +352,21 @@ class MainActivity : AppCompatActivity() {
             "openPrivacy" -> BuildConfig.PRIVACY_URL.takeIf { it.startsWith("https://") }
                 ?.let { openUrl(it, getString(R.string.privacy_policy)) }
             "overlay" -> backToUi.isEnabled = UiJson.flag(raw, "open")
+            "acceptTerms" -> if (!termsAccepted && UiJson.field(raw, "version", 32) == Terms.VERSION) {
+                Terms.accept(this)
+                termsAccepted = true
+                send(UiJson.terms(true, Terms.VERSION))
+                startAccount()
+            }
+            "declineTerms" -> finishAndRemoveTask()   // asked again the next time the app opens
             else -> Log.w(TAG, "ignored an unknown message from the UI")
         }
+    }
+
+    /** After the agreement: refresh the plan, or register this phone on its first start (portal builds). */
+    private fun startAccount() {
+        if (accountAvailable) refreshAccount()
+        else if (Portal.configured && profile == null && !importing) enroll(connectAfter = false)
     }
 
     // ------------------------------------------------------------------ Free with ads / sign-in / Pro
