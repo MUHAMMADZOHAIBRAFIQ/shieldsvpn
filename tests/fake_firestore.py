@@ -1,7 +1,9 @@
-"""A small stand-in for Google's OAuth token endpoint and the Firestore REST API (tests only).
+"""A small stand-in for Google's OAuth token endpoint, the Firestore REST API and the two Google Play Developer API
+calls the portal makes (tests only).
 
 It checks the RS256 service-account assertion like Google does (signature, aud, scope, iss, exp) and keeps
-documents in memory, so the mirror can be tested end to end without a real Firebase project.
+documents and Play subscription purchases in memory, so the Firebase mirror and Play billing can be tested end to end
+without real Google projects.
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ import urllib.parse
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pqvpn.crypto import ossl  # noqa: E402
+from pqvpn.portal import play  # noqa: E402
 from pqvpn.portal.firebase import SCOPE, TOKEN_URI  # noqa: E402
 
 PROJECT = "pq-vpn-test"
@@ -48,6 +51,8 @@ class FakeGoogle:
         self.lock = threading.Lock()
         self.public_key: ossl.PKey | None = None
         self.client_email = ""
+        self.play_subs: dict[str, tuple[str, dict]] = {}  # purchase token -> (package, SubscriptionPurchaseV2)
+        self.play_acks: list[str] = []
         fake = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -66,9 +71,13 @@ class FakeGoogle:
                 body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
                 if self.path == "/token":
                     return self._reply(*fake.token(body.decode()))
+                if self.path.startswith("/androidpublisher/"):
+                    return self._reply(*fake.play("POST", self.path, self.headers))
                 return self._reply(*fake.firestore("POST", self.path, self.headers, body))
 
             def do_GET(self):
+                if self.path.startswith("/androidpublisher/"):
+                    return self._reply(*fake.play("GET", self.path, self.headers))
                 return self._reply(*fake.firestore("GET", self.path, self.headers, b""))
 
         self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -98,7 +107,7 @@ class FakeGoogle:
                 not ossl.verify_hashed(self.public_key, f"{h64}.{c64}".encode(), _unb64(s64), "SHA256"):
             return bad
         now = time.time()
-        if claims.get("aud") != f"{self.url}/token" or claims.get("scope") != SCOPE or \
+        if claims.get("aud") != f"{self.url}/token" or claims.get("scope") not in (SCOPE, play.SCOPE) or \
                 claims.get("iss") != self.client_email or not claims["iat"] - 60 <= now < claims["exp"]:
             return 400, {"error": "invalid_grant", "error_description": "Invalid JWT claims."}
         with self.lock:
@@ -145,6 +154,48 @@ class FakeGoogle:
                     return 404, {"error": {"code": 404, "status": "NOT_FOUND", "message": "Document not found"}}
                 return 200, {"name": m.group(1), "fields": self.docs[m.group(1)]}
         return 400, {"error": {"code": 400, "status": "INVALID_ARGUMENT", "message": f"unsupported {method} {rel}"}}
+
+    # -------------------------------------------------------------- Google Play Developer API v3 (subset)
+    @property
+    def play_api(self) -> str:
+        return f"{self.url}/androidpublisher/v3"
+
+    def add_play_purchase(self, token: str, package: str, product: str, account: str, *, days: float = 30,
+                          state: str = "SUBSCRIPTION_STATE_ACTIVE", base_plan: str = "monthly",
+                          linked: str | None = None, test: bool = False) -> dict:
+        """What Google holds after someone buys ``product`` in the app with ``setObfuscatedAccountId(account)``."""
+        sub = {"kind": "androidpublisher#subscriptionPurchaseV2", "subscriptionState": state,
+               "acknowledgementState": "ACKNOWLEDGEMENT_STATE_PENDING",
+               "externalAccountIdentifiers": {"obfuscatedExternalAccountId": account},
+               "lineItems": [{"productId": product, "offerDetails": {"basePlanId": base_plan},
+                              "expiryTime": time.strftime("%Y-%m-%dT%H:%M:%S.000Z",
+                                                          time.gmtime(time.time() + days * 86400))}]}
+        if linked:
+            sub["linkedPurchaseToken"] = linked
+        if test:
+            sub["testPurchase"] = {}
+        with self.lock:
+            self.play_subs[token] = (package, sub)
+        return sub
+
+    def play(self, method: str, path: str, headers):
+        if headers.get("Authorization") != "Bearer fake-access-token":
+            return 401, {"error": {"code": 401, "status": "UNAUTHENTICATED", "message": "invalid credentials"}}
+        p = urllib.parse.unquote(urllib.parse.urlsplit(path).path)
+        m = re.fullmatch(r"/androidpublisher/v3/applications/([^/]+)/purchases/subscriptionsv2/tokens/(.+)", p)
+        with self.lock:
+            if method == "GET" and m:
+                package, sub = self.play_subs.get(m.group(2), ("", None))
+                if sub is None or package != m.group(1):
+                    return 404, {"error": {"code": 404, "status": "NOT_FOUND", "message": "purchase not found"}}
+                return 200, sub
+            m = re.fullmatch(r"/androidpublisher/v3/applications/([^/]+)/purchases/subscriptions/([^/]+)/tokens/"
+                             r"(.+):acknowledge", p)
+            if method == "POST" and m and m.group(3) in self.play_subs:
+                self.play_subs[m.group(3)][1]["acknowledgementState"] = "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED"
+                self.play_acks.append(m.group(3))
+                return 200, {}
+        return 404, {"error": {"code": 404, "status": "NOT_FOUND", "message": f"unsupported {method} {p}"}}
 
     def value(self, path: str, field: str):
         """Decoded value of one field, for assertions."""

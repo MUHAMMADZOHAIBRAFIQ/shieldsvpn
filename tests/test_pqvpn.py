@@ -312,8 +312,8 @@ class TestHandshakeLogic(unittest.TestCase):
         self.cli = tp().identity(pki.ROLE_CLIENT, "alice", ["10.66.0.2/32"])
         self.suites = tuple(SUITES_BY_NAME.values())
 
-    def responder(self, suites=None, psk=None, trust=None):
-        return Responder(self.srv, trust or tp().trust(), Policy(suites or self.suites, psk),
+    def responder(self, suites=None, psk=None, trust=None, psk_optional=False):
+        return Responder(self.srv, trust or tp().trust(), Policy(suites or self.suites, psk, psk_optional),
                          lambda c: {"addresses": list(c.addresses)})
 
     def test_keys_match(self):
@@ -356,6 +356,27 @@ class TestHandshakeLogic(unittest.TestCase):
         ri, rr = _drive(Initiator(self.cli, tp().trust(), Policy(self.suites, os.urandom(32)), "vpn.test"),
                         self.responder(psk=psk))
         self.assertIsNone(rr)  # AUTH_I fails AEAD under the wrong handshake key
+        ri, rr = _drive(Initiator(self.cli, tp().trust(), Policy(self.suites), "vpn.test"), self.responder(psk=psk))
+        self.assertIsNone(rr)  # without psk_optional a PSK responder refuses initiators that have none
+
+    def test_psk_optional_responder(self):
+        """psk_optional: PSK and no-PSK initiators both complete; each keeps its own key schedule; wrong PSK fails."""
+        psk = os.urandom(32)
+        for suite in self.suites:
+            for client_psk, ok, used in ((psk, True, True), (None, True, False), (os.urandom(32), False, None)):
+                ri, rr = _drive(Initiator(self.cli, tp().trust(), Policy((suite,), client_psk), "vpn.test"),
+                                self.responder(suites=(suite,), psk=psk, psk_optional=True))
+                if ok:
+                    self.assertEqual((ri.send_key, ri.recv_key), (rr.recv_key, rr.send_key), suite.name)
+                    self.assertEqual(rr.psk_used, used)
+                else:
+                    self.assertIsNone(rr, suite.name)
+        # The PSK really is mixed in: the same exchange without it gives different traffic keys.
+        a, _ = _drive(Initiator(self.cli, tp().trust(), Policy(self.suites, psk), "vpn.test"),
+                      self.responder(psk=psk, psk_optional=True))
+        b, _ = _drive(Initiator(self.cli, tp().trust(), Policy(self.suites), "vpn.test"),
+                      self.responder(psk=psk, psk_optional=True))
+        self.assertNotEqual(a.send_key, b.send_key)
 
     def test_revoked_client(self):
         ini = Initiator(self.cli, tp().trust(), Policy(self.suites), "vpn.test")

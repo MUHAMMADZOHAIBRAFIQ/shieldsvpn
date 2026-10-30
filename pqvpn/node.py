@@ -255,7 +255,7 @@ class ServerNode(BaseNode):
         super().__init__(tun, cfg.mtu, cfg.crypto.rekey_interval)
         self.cfg = cfg
         self.access = access  # portal.access.PortalAccess (account-based authorisation)
-        self.policy = Policy(cfg.crypto.suites, cfg.crypto.psk)
+        self.policy = Policy(cfg.crypto.suites, cfg.crypto.psk, cfg.crypto.psk_optional)
         self.responder = Responder(identity, trust, self.policy, self.config_for)
         self.half_open: dict[int, ResponderHandshake] = {}
         self.init_index: dict[tuple, int] = {}
@@ -361,8 +361,8 @@ class ServerNode(BaseNode):
             if old is not None and old is not peer:
                 log.warning("address %s moved from %s to %s", net, old.name, peer.name)
         self.install(peer, result, now)
-        log.info("peer %s authenticated from %s:%d [%s, %s] -> %s", cert.subject, *addr,
-                 result.suite.name, cert.key_alg.name, ", ".join(cert.addresses))
+        log.info("peer %s authenticated from %s:%d [%s, %s%s] -> %s", cert.subject, *addr,
+                 result.suite.name, cert.key_alg.name, ", PSK" if result.psk_used else "", ", ".join(cert.addresses))
 
     def disconnect(self, name: str, reason: str) -> None:
         peer = self.peers.pop(name, None)
@@ -405,7 +405,7 @@ class ServerNode(BaseNode):
             self.keepalive_timers(peer, now)
         if self.access is not None:
             for name in self.access.sync(self.peers, now):
-                self.disconnect(name, "account disabled or profile superseded in portal")
+                self.disconnect(name, "no longer allowed by the portal (disabled, superseded, or free time over)")
         if now - self._last_status > 60:
             self._last_status = now
             self.rate.prune(now)

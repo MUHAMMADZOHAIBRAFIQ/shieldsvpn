@@ -93,18 +93,94 @@ CREATE TABLE IF NOT EXISTS devices (
     failed_logins INTEGER NOT NULL DEFAULT 0,
     locked_until INTEGER NOT NULL DEFAULT 0
 );
+-- Phones and PCs that enrolled themselves through the app API (devices.py).  Each has its own certificate
+-- (subject "d-..."), so the VPN server keeps one peer per device.  user_id is NULL for anonymous Free devices
+-- and set while someone is signed in on the device.  known_user_id remembers the last account signed in
+-- here, so failed sign-ins from that device lock only the device (same idea as the browser "devices" table).
+CREATE TABLE IF NOT EXISTS vpn_devices (
+    id INTEGER PRIMARY KEY,
+    subject TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    token_hash TEXT NOT NULL UNIQUE,
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    known_user_id INTEGER,
+    platform TEXT NOT NULL,
+    vpn_ip TEXT UNIQUE,
+    active_serial TEXT,
+    cert_expires INTEGER,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    free_until INTEGER NOT NULL DEFAULT 0,
+    failed_logins INTEGER NOT NULL DEFAULT 0,
+    locked_until INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    last_seen INTEGER NOT NULL,
+    enroll_ip TEXT
+);
+-- One row per "watch an ad for free time" attempt.  The nonce is stored hashed; granted_at is set once
+-- (single use) and provider_ref (the ad network's transaction id) is unique, so a replayed callback grants nothing.
+CREATE TABLE IF NOT EXISTS reward_grants (
+    id INTEGER PRIMARY KEY,
+    device_id INTEGER NOT NULL REFERENCES vpn_devices(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    nonce_hash TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL,
+    started_at INTEGER,
+    granted_at INTEGER,
+    provider_ref TEXT UNIQUE
+);
+-- One-time links to Paddle's checkout (payments.py): the transaction was created by the portal for this account.
+CREATE TABLE IF NOT EXISTS pay_links (
+    code_hash TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    txn_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    completed_at INTEGER
+);
+-- Payments seen at the provider (receipts stay with Paddle, the merchant of record); never card data.
+CREATE TABLE IF NOT EXISTS payments (
+    id INTEGER PRIMARY KEY,
+    provider TEXT NOT NULL,
+    provider_ref TEXT NOT NULL UNIQUE,
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    status TEXT NOT NULL,
+    amount TEXT,
+    currency TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+-- Google Play subscription purchases (play.py), checked with Google's API.  One account per purchase token; replaced
+-- = superseded by a newer token (plan change or re-signup).  Tokens are never logged.
+CREATE TABLE IF NOT EXISTS play_purchases (
+    token TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    product_id TEXT NOT NULL,
+    base_plan TEXT,
+    state TEXT NOT NULL,
+    expires INTEGER,
+    test INTEGER NOT NULL DEFAULT 0,
+    replaced INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
 """
 
 # Columns added after the first release: (name, definition) -- applied to older databases on open.
 # email_verified defaults to 1 so every admin-created account stays usable; self-service sign-ups set it to 0
 # until the emailed code is entered.
 USER_COLUMNS = [("email", "TEXT"), ("plan", "TEXT NOT NULL DEFAULT 'free'"), ("plan_expires", "INTEGER"),
-                ("custom_dns", "TEXT"), ("email_verified", "INTEGER NOT NULL DEFAULT 1")]
+                ("custom_dns", "TEXT"), ("email_verified", "INTEGER NOT NULL DEFAULT 1"),
+                ("paddle_customer_id", "TEXT"), ("paddle_subscription_id", "TEXT")]
 INDEXES = """
 CREATE UNIQUE INDEX IF NOT EXISTS users_email ON users (email COLLATE NOCASE) WHERE email IS NOT NULL;
 CREATE INDEX IF NOT EXISTS password_resets_user ON password_resets (user_id, created_at);
 CREATE INDEX IF NOT EXISTS devices_user ON devices (user_id, last_used);
+CREATE INDEX IF NOT EXISTS vpn_devices_user ON vpn_devices (user_id);
+CREATE INDEX IF NOT EXISTS vpn_devices_enroll ON vpn_devices (enroll_ip, created_at);
+CREATE INDEX IF NOT EXISTS reward_grants_device ON reward_grants (device_id, granted_at);
+CREATE INDEX IF NOT EXISTS play_purchases_due ON play_purchases (replaced, expires);
 """
+VPN_DEVICE_FIELDS = {"user_id", "known_user_id", "active_serial", "cert_expires", "enabled", "free_until",
+                     "failed_logins", "locked_until", "last_seen", "token_hash"}
 MAX_DEVICES_PER_USER = 20
 
 
@@ -149,13 +225,25 @@ class Store:
     # -------------------------------------------------------------- users
     def create_user(self, username: str, role: str, password: str, display_name: str = "",
                     vpn_ip: str | None = None, must_change: bool = True) -> int:
+        password_hash = auth.hash_password(password)  # before the write lock: scrypt takes a while
         with self._db() as db:
-            cur = db.execute(
-                "INSERT INTO users (username, display_name, role, password_hash, must_change_password, vpn_ip,"
-                " created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (username, display_name, role, auth.hash_password(password), int(must_change), vpn_ip,
-                 int(time.time())))
-            return cur.lastrowid
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                # Never reuse a deleted account's id.  Payments name accounts by id (Paddle custom_data, the Google
+                # Play account reference), so a reused id would inherit someone else's running subscription.
+                # SQLite reuses the highest rowid after it is deleted; users_id_floor remembers deleted ids.
+                floor = db.execute("SELECT value FROM meta WHERE key = 'users_id_floor'").fetchone()
+                top = db.execute("SELECT COALESCE(MAX(id), 0) FROM users").fetchone()[0]
+                uid = max(top, int(floor[0]) if floor else 0) + 1
+                db.execute(
+                    "INSERT INTO users (id, username, display_name, role, password_hash, must_change_password, vpn_ip,"
+                    " created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (uid, username, display_name, role, password_hash, int(must_change), vpn_ip, int(time.time())))
+                db.execute("COMMIT")
+            except BaseException:
+                db.execute("ROLLBACK")
+                raise
+            return uid
 
     def user(self, user_id: int) -> dict | None:
         return self._one("SELECT * FROM users WHERE id = ?", (user_id,))
@@ -172,22 +260,192 @@ class Store:
     def update_user(self, user_id: int, **fields) -> None:
         allowed = {"display_name", "role", "password_hash", "must_change_password", "totp_secret", "totp_enabled",
                    "totp_last_step", "enabled", "vpn_ip", "active_serial", "profile_issued_at", "failed_logins",
-                   "locked_until", "last_login_at", "email", "plan", "plan_expires", "custom_dns", "email_verified"}
+                   "locked_until", "last_login_at", "email", "plan", "plan_expires", "custom_dns", "email_verified",
+                   "paddle_customer_id", "paddle_subscription_id"}
         if not fields or set(fields) - allowed:
             raise ValueError(f"bad fields {set(fields) - allowed}")
         cols = ", ".join(f"{k} = ?" for k in fields)
         self._exec(f"UPDATE users SET {cols} WHERE id = ?", (*fields.values(), user_id))
 
     def delete_user(self, user_id: int) -> None:
-        self._exec("DELETE FROM users WHERE id = ?", (user_id,))
+        with self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            # The account's app devices become anonymous Free devices with no time left (ON DELETE SET NULL),
+            # so deleting someone still ends their VPN access within one status interval.
+            db.execute("UPDATE vpn_devices SET free_until = 0 WHERE user_id = ?", (user_id,))
+            db.execute("INSERT INTO meta (key, value) VALUES ('users_id_floor', ?) ON CONFLICT(key) DO UPDATE SET"
+                       " value = CAST(MAX(CAST(meta.value AS INTEGER), CAST(excluded.value AS INTEGER)) AS TEXT)",
+                       (str(user_id),))  # see create_user: this id is never handed out again
+            db.execute("DELETE FROM users WHERE id = ?", (user_id,))
+            db.execute("COMMIT")
+
+    def unlink_vpn_devices(self, user_id: int) -> int:
+        """Sign the account out of every app device (they become Free devices again).  Returns how many."""
+        return self._exec("UPDATE vpn_devices SET user_id = NULL WHERE user_id = ?", (user_id,))
 
     def allocate_ip(self, subnet: str, reserved: set[str]) -> str:
+        with self._db() as db:
+            return self._free_ip(db, subnet, reserved)
+
+    @staticmethod
+    def _free_ip(db, subnet: str, reserved: set[str]) -> str:
         net = ipaddress.ip_network(subnet)
-        used = {u["vpn_ip"] for u in self._all("SELECT vpn_ip FROM users WHERE vpn_ip IS NOT NULL")} | reserved
+        used = {r[0] for r in db.execute("SELECT vpn_ip FROM users WHERE vpn_ip IS NOT NULL UNION "
+                                         "SELECT vpn_ip FROM vpn_devices WHERE vpn_ip IS NOT NULL")} | reserved
         for host in net.hosts():
             if str(host) not in used:
                 return str(host)
         raise ValueError(f"no free addresses left in {subnet}")
+
+    # -------------------------------------------------------------- app-enrolled VPN devices (devices.py)
+    def create_vpn_device(self, subject: str, token_hash: str, platform: str, subnet: str, reserved: set[str],
+                          ip: str) -> dict:
+        """Insert a device with a freshly allocated tunnel address (one transaction, so two parallel
+        enrollments cannot get the same address)."""
+        now = int(time.time())
+        with self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                vpn_ip = self._free_ip(db, subnet, reserved)
+                cur = db.execute("INSERT INTO vpn_devices (subject, token_hash, platform, vpn_ip, created_at,"
+                                 " last_seen, enroll_ip) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                 (subject, token_hash, platform, vpn_ip, now, now, ip))
+                db.execute("COMMIT")
+            except BaseException:
+                db.execute("ROLLBACK")
+                raise
+        return self.vpn_device(cur.lastrowid)
+
+    def vpn_device(self, device_id: int) -> dict | None:
+        return self._one("SELECT * FROM vpn_devices WHERE id = ?", (device_id,))
+
+    def vpn_device_by_subject(self, subject: str) -> dict | None:
+        return self._one("SELECT * FROM vpn_devices WHERE subject = ?", (subject,))
+
+    def vpn_device_by_token(self, token: str) -> dict | None:
+        return self._one("SELECT * FROM vpn_devices WHERE token_hash = ?", (auth.token_hash(token),))
+
+    def vpn_devices(self, user_id: int | None = None, limit: int = 500) -> list[dict]:
+        if user_id is None:
+            return self._all("SELECT * FROM vpn_devices ORDER BY last_seen DESC LIMIT ?", (limit,))
+        return self._all("SELECT * FROM vpn_devices WHERE user_id = ? ORDER BY last_seen DESC", (user_id,))
+
+    def update_vpn_device(self, device_id: int, **fields) -> None:
+        if not fields or set(fields) - VPN_DEVICE_FIELDS:
+            raise ValueError(f"bad fields {set(fields) - VPN_DEVICE_FIELDS}")
+        cols = ", ".join(f"{k} = ?" for k in fields)
+        self._exec(f"UPDATE vpn_devices SET {cols} WHERE id = ?", (*fields.values(), device_id))
+
+    def delete_vpn_device(self, device_id: int) -> None:
+        self._exec("DELETE FROM vpn_devices WHERE id = ?", (device_id,))
+
+    def enrollments_since(self, ip: str, since: int) -> int:
+        return self._one("SELECT COUNT(*) AS n FROM vpn_devices WHERE enroll_ip = ? AND created_at >= ?",
+                         (ip, since))["n"]
+
+    def device_counts(self) -> dict:
+        row = self._one("SELECT COUNT(*) AS total, SUM(user_id IS NULL) AS anonymous FROM vpn_devices")
+        return {"total": row["total"] or 0, "anonymous": row["anonymous"] or 0}
+
+    def touch_vpn_devices(self, subjects: list[str], now: int) -> None:
+        if subjects:
+            with self._db() as db:
+                db.executemany("UPDATE vpn_devices SET last_seen = ? WHERE subject = ?", [(now, s) for s in subjects])
+
+    def purge_anonymous_devices(self, max_age: int) -> int:
+        """Forget anonymous devices unseen for ``max_age`` seconds; their tunnel addresses become free again."""
+        return self._exec("DELETE FROM vpn_devices WHERE user_id IS NULL AND last_seen < ?",
+                          (int(time.time()) - max_age,))
+
+    def add_free_time(self, device_id: int, seconds: int, now: int) -> int:
+        """Extend free time atomically (from now, or from the end of time already granted); return the new end."""
+        with self._db() as db:
+            db.execute("UPDATE vpn_devices SET free_until = MAX(free_until, ?) + ? WHERE id = ?",
+                       (now, seconds, device_id))
+            return db.execute("SELECT free_until FROM vpn_devices WHERE id = ?", (device_id,)).fetchone()[0]
+
+    # -------------------------------------------------------------- ad rewards
+    def create_reward(self, device_id: int, kind: str, nonce_hash: str) -> int:
+        with self._db() as db:
+            return db.execute("INSERT INTO reward_grants (device_id, kind, nonce_hash, created_at) VALUES (?, ?, ?, ?)",
+                              (device_id, kind, nonce_hash, int(time.time()))).lastrowid
+
+    def reward_by_nonce(self, nonce_hash: str) -> dict | None:
+        return self._one("SELECT * FROM reward_grants WHERE nonce_hash = ?", (nonce_hash,))
+
+    def start_reward(self, reward_id: int, now: int) -> None:
+        self._exec("UPDATE reward_grants SET started_at = ? WHERE id = ? AND started_at IS NULL", (now, reward_id))
+
+    def claim_reward(self, reward_id: int, now: int, provider_ref: str | None = None) -> bool:
+        """Mark granted; False if it was already granted or the provider reference was used before (single use)."""
+        try:
+            return self._exec("UPDATE reward_grants SET granted_at = ?, provider_ref = ? WHERE id = ? AND"
+                              " granted_at IS NULL", (now, provider_ref, reward_id)) == 1
+        except sqlite3.IntegrityError:  # provider_ref already used by another grant: a replayed callback
+            return False
+
+    def rewards_granted_since(self, device_id: int, since: int) -> int:
+        return self._one("SELECT COUNT(*) AS n FROM reward_grants WHERE device_id = ? AND granted_at >= ?",
+                         (device_id, since))["n"]
+
+    def purge_rewards(self, older_than: int) -> None:
+        self._exec("DELETE FROM reward_grants WHERE created_at < ?", (int(time.time()) - older_than,))
+
+    # -------------------------------------------------------------- payments (payments.py)
+    def create_pay_link(self, code_hash: str, user_id: int, txn_id: str, ttl: int) -> None:
+        now = int(time.time())
+        self._exec("INSERT INTO pay_links (code_hash, user_id, txn_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
+                   (code_hash, user_id, txn_id, now, now + ttl))
+
+    def pay_link(self, code_hash: str) -> dict | None:
+        return self._one("SELECT * FROM pay_links WHERE code_hash = ?", (code_hash,))
+
+    def open_pay_links(self, user_id: int, since: float) -> list[dict]:
+        return self._all("SELECT * FROM pay_links WHERE user_id = ? AND completed_at IS NULL AND created_at >= ?"
+                         " ORDER BY created_at DESC LIMIT 10", (user_id, int(since)))
+
+    def complete_pay_link(self, code_hash: str) -> None:
+        self._exec("UPDATE pay_links SET completed_at = ? WHERE code_hash = ? AND completed_at IS NULL",
+                   (int(time.time()), code_hash))
+
+    def record_payment(self, provider: str, ref: str, user_id: int, status: str, amount: str, currency: str) -> None:
+        now = int(time.time())
+        self._exec("INSERT INTO payments (provider, provider_ref, user_id, status, amount, currency, created_at,"
+                   " updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(provider_ref) DO UPDATE SET"
+                   " status = excluded.status, updated_at = excluded.updated_at",
+                   (provider, ref, user_id, status, amount, currency, now, now))
+
+    def payments(self, user_id: int | None = None, limit: int = 100) -> list[dict]:
+        if user_id is None:
+            return self._all("SELECT * FROM payments ORDER BY created_at DESC LIMIT ?", (limit,))
+        return self._all("SELECT * FROM payments WHERE user_id = ? ORDER BY created_at DESC LIMIT ?", (user_id, limit))
+
+    # -------------------------------------------------------------- Google Play purchases (play.py)
+    def play_purchase(self, token: str) -> dict | None:
+        return self._one("SELECT * FROM play_purchases WHERE token = ?", (token,))
+
+    def save_play_purchase(self, token: str, user_id: int, product_id: str, base_plan: str, state: str,
+                           expires: int, test: bool) -> None:
+        now = int(time.time())
+        self._exec("INSERT INTO play_purchases (token, user_id, product_id, base_plan, state, expires, test, created_at,"
+                   " updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(token) DO UPDATE SET"
+                   " state = excluded.state, expires = excluded.expires, base_plan = excluded.base_plan,"
+                   " updated_at = excluded.updated_at WHERE play_purchases.user_id = excluded.user_id",
+                   (token, user_id, product_id, base_plan, state, expires, int(test), now, now))
+
+    def replace_play_purchase(self, token: str, user_id: int) -> None:
+        self._exec("UPDATE play_purchases SET replaced = 1, updated_at = ? WHERE token = ? AND user_id = ?",
+                   (int(time.time()), token, user_id))
+
+    def play_purchases_due(self, ending_before: float) -> list[dict]:
+        # Purchases that ended more than 60 days ago are left alone: Google stops answering for them.
+        return self._all("SELECT * FROM play_purchases WHERE replaced = 0 AND expires < ? AND expires > ? AND state"
+                         " NOT IN ('SUBSCRIPTION_STATE_EXPIRED', 'SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED')"
+                         " ORDER BY expires LIMIT 500", (int(ending_before), int(time.time()) - 60 * 86400))
+
+    def users_with_subscriptions(self, ending_before: float) -> list[dict]:
+        return self._all("SELECT * FROM users WHERE paddle_subscription_id IS NOT NULL AND"
+                         " (plan_expires IS NULL OR plan_expires < ?)", (int(ending_before),))
 
     # -------------------------------------------------------------- sessions
     def create_session(self, user_id: int, ip: str, user_agent: str, pending_2fa: bool) -> tuple[str, str]:

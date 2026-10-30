@@ -157,6 +157,28 @@ def render_png(state: str, size: int) -> bytes:
     return r.png()
 
 
+def render_tile(state: str, size: int, background: tuple[int, int, int], scale: float = 0.7) -> bytes:
+    """The logo centred on an opaque square tile (store icons): the shield takes ``scale`` of the tile."""
+    top, bottom = PALETTES[state]
+    off = (1 - scale) * 50
+
+    def place(contour):
+        return [(off + x * scale, off + y * scale) for x, y in contour]
+
+    def grad(t):  # t runs over the tile; the gradient runs over the shield
+        u = min(1.0, max(0.0, (t * 100 - off) / (100 * scale)))
+        return tuple(top[i] + (bottom[i] - top[i]) * u for i in range(3))
+
+    r = _Raster(size, ss=2)
+    r.fill([[(0, 0), (100, 0), (100, 100), (0, 100)]], lambda _t: background)
+    r.fill([place(SHIELD)], grad)
+    r.fill([place(SHACKLE)], lambda _t: (255, 255, 255))
+    r.fill([place(LOCK_BODY)], lambda _t: (255, 255, 255))
+    for part in KEYHOLE:
+        r.fill([place(part)], grad)
+    return r.png()
+
+
 def render_ico(state: str, sizes=ICO_SIZES) -> bytes:
     images = [(s, render_png(state, s)) for s in sizes]
     out = struct.pack("<HHH", 0, 1, len(images))

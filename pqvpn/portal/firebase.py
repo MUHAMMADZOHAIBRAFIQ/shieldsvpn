@@ -25,7 +25,6 @@ Python packages.  The key file lives next to the database with mode 0600.
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import json
 import logging
@@ -35,21 +34,19 @@ import threading
 import time
 import urllib.error
 import urllib.parse
-import urllib.request
 
 from .. import __version__
 from ..crypto import ossl
 from ..crypto.suites import describe_suite
 from . import mail, plans
+from .google import GOOGLE_TOKEN_URIS, TOKEN_URI, GoogleError, ServiceAccount
 
 log = logging.getLogger("pqvpn.firebase")
 
 FIRESTORE = "https://firestore.googleapis.com/v1"
 SCOPE = "https://www.googleapis.com/auth/datastore"
-# The key file's own token_uri is never used as a URL: a pasted key must not be able to make the server
-# send requests (and a signed assertion) anywhere else.  These are the values Google puts in its keys.
-TOKEN_URI = "https://oauth2.googleapis.com/token"
-GOOGLE_TOKEN_URIS = {TOKEN_URI, "https://accounts.google.com/o/oauth2/token"}
+# The key file's own token_uri is never used as a URL (google.ServiceAccount): TOKEN_URI / GOOGLE_TOKEN_URIS are the
+# values Google puts in its keys, re-exported here for the key check and the tests.
 PROJECT_ID_RE = re.compile(r"^(?:[a-z0-9.-]{1,63}:)?[a-z][a-z0-9-]{4,28}[a-z0-9]$")  # optional legacy domain prefix
 KEY_FILE = "firebase-key.json"
 SYNC_INTERVAL, TRAFFIC_INTERVAL, MAX_BACKOFF = 10, 300, 300
@@ -57,7 +54,7 @@ BATCH, AUDIT_PER_SYNC = 500, 2000
 MIRRORED_COLLECTIONS = ("users", "connections")  # reconciled (stale documents are deleted)
 
 
-class FirebaseError(Exception):
+class FirebaseError(GoogleError):
     pass
 
 
@@ -104,10 +101,6 @@ def save_key(path: str, key: dict) -> None:
 
 # ------------------------------------------------------------------ Firestore REST client
 
-def _b64url(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
-
-
 def encode_value(v) -> dict:
     """Python value -> Firestore REST Value."""
     if v is None:
@@ -144,58 +137,18 @@ def ts(value) -> Timestamp | None:
     return Timestamp(value) if value else None
 
 
-class Client:
+class Client(ServiceAccount):
+    error = FirebaseError
+
     def __init__(self, key: dict, endpoint: str = FIRESTORE, database: str = "(default)", timeout: float = 20,
                  token_uri: str = TOKEN_URI):
-        self.key, self.project, self.email = key, key["project_id"], key["client_email"]
-        self._pkey = ossl.private_from_pem(key["private_key"].encode())
+        super().__init__(key, SCOPE, timeout, token_uri)
+        self.project = key["project_id"]
         self.prefix = f"projects/{urllib.parse.quote(self.project, safe=':')}/databases/{database}/documents"
         self.base = f"{endpoint.rstrip('/')}/{self.prefix}"
-        self.timeout = timeout
-        self.token_uri = token_uri  # fixed by the portal (tests point it at a fake), never taken from the key
-        self._token, self._token_expiry = "", 0.0
 
-    def _assertion(self) -> str:
-        now = int(time.time())
-        header = {"alg": "RS256", "typ": "JWT"}
-        if self.key.get("private_key_id"):
-            header["kid"] = self.key["private_key_id"]
-        claims = {"iss": self.email, "scope": SCOPE, "aud": self.token_uri, "iat": now, "exp": now + 3600}
-        signing_input = f"{_b64url(json.dumps(header).encode())}.{_b64url(json.dumps(claims).encode())}"
-        return f"{signing_input}.{_b64url(ossl.sign_hashed(self._pkey, signing_input.encode(), 'SHA256'))}"
-
-    def token(self) -> str:
-        if self._token and time.time() < self._token_expiry - 120:
-            return self._token
-        body = urllib.parse.urlencode({"grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
-                                       "assertion": self._assertion()}).encode()
-        data = self._http("POST", self.token_uri, body, {"Content-Type": "application/x-www-form-urlencoded"})
-        try:
-            self._token = str(data["access_token"])
-            self._token_expiry = time.time() + int(data.get("expires_in", 3600))
-        except (KeyError, TypeError, ValueError):
-            raise FirebaseError("Google's token endpoint sent an unexpected answer") from None
-        return self._token
-
-    def _http(self, method: str, url: str, body: bytes | None, headers: dict) -> dict:
-        req = urllib.request.Request(url, data=body, method=method, headers=headers)
-        try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as r:
-                data = json.loads(r.read() or b"{}")
-        except urllib.error.HTTPError as exc:
-            raise FirebaseError(_google_error(exc)) from None
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            raise FirebaseError(f"cannot reach Google ({getattr(exc, 'reason', exc)})") from None
-        except ValueError:
-            raise FirebaseError("Google sent an answer that is not JSON") from None
-        if not isinstance(data, dict):
-            raise FirebaseError("Google sent an unexpected answer")
-        return data
-
-    def _api(self, method: str, url: str, payload: dict | None = None) -> dict:
-        body = json.dumps(payload).encode() if payload is not None else None
-        return self._http(method, url, body, {"Authorization": f"Bearer {self.token()}",
-                                              "Content-Type": "application/json"})
+    def _describe(self, exc: urllib.error.HTTPError) -> str:
+        return _google_error(exc)
 
     def commit(self, writes: list[dict]) -> None:
         for i in range(0, len(writes), BATCH):

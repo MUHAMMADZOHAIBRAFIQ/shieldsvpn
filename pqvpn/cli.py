@@ -293,13 +293,33 @@ def cmd_portal(args) -> int:
     return 0
 
 
+def _app_config(args) -> str:
+    """-c PROFILE, or this PC's registered device (registering it first with --portal)."""
+    if args.config:
+        return args.config
+    from .account_client import PortalError
+    from .desktop_account import DesktopAccount
+    acct = DesktopAccount()
+    if not acct.exists():
+        if not args.portal:
+            raise SystemExit("give -c client.toml (a profile from the portal), or --portal https://... to register "
+                             "this PC for the Free plan")
+        try:
+            acct = DesktopAccount.enroll(args.portal, args.pin or "", args.allow_http)
+        except (PortalError, ValueError) as exc:
+            raise SystemExit(f"could not register this PC: {getattr(exc, 'message', None) or exc}")
+        print(f"registered this PC; profile in {acct.dir}")
+    return acct.config_path
+
+
 def cmd_app(args) -> int:
     from .app import install_shortcut, main
+    config = _app_config(args)
     if args.install_shortcut:
-        for path in install_shortcut(args.config):
+        for path in install_shortcut(config):
             print(f"created {path}")
         return 0
-    return main(args.config, autoconnect=args.connect)
+    return main(config, autoconnect=args.connect)
 
 
 def cmd_tray(args) -> int:
@@ -311,6 +331,30 @@ def cmd_tray(args) -> int:
             print(f"created {path}")
         return 0
     return winui.main(args.config, autoconnect=not args.no_connect, replace=args.replace)
+
+
+def cmd_native_host(args) -> int:
+    from . import native_host
+    return native_host.main(args.origin)
+
+
+def cmd_browser_host(args) -> int:
+    if sys.platform != "win32":
+        raise SystemExit("the browser companion is Windows-only (it controls the Windows tray app)")
+    from . import native_host
+    if args.action == "uninstall":
+        native_host.uninstall()
+        print("browser companion helper removed")
+        return 0
+    config = args.config
+    if config is None:
+        from .desktop_account import DesktopAccount
+        acct = DesktopAccount()
+        config = acct.config_path if acct.exists() else None
+    for path in native_host.install(args.chrome_id or [], args.firefox_id, config):
+        print(f"wrote {path}")
+    print("registered for Chrome, Edge, Brave, Chromium, Opera" + (" and Firefox" if args.firefox_id else ""))
+    return 0
 
 
 def cmd_selftest(args) -> int:
@@ -400,7 +444,10 @@ def main(argv=None) -> int:
     po.set_defaults(fn=cmd_portal)
 
     ap = sub.add_parser("app", help="ShieldsVPN desktop app: a simple 'Tap to Connect' window")
-    ap.add_argument("-c", "--config", required=True)
+    ap.add_argument("-c", "--config", help="a client profile; default: this PC's registered device")
+    ap.add_argument("--portal", help="first run: register this PC with this portal (Free plan, no account)")
+    ap.add_argument("--pin", help="SHA-256 of the portal's TLS certificate (self-signed portal, e.g. via playit.gg)")
+    ap.add_argument("--allow-http", action="store_true", help="allow a plain-http portal (local testing only)")
     ap.add_argument("--connect", action="store_true", help="connect automatically on launch")
     ap.add_argument("--install-shortcut", action="store_true", help="create a Desktop/Start-menu shortcut")
     ap.set_defaults(fn=cmd_app)
@@ -411,6 +458,17 @@ def main(argv=None) -> int:
     tr.add_argument("--install-shortcut", action="store_true", help="create Desktop/Start-menu shortcuts")
     tr.add_argument("--replace", action="store_true", help="cleanly stop a running instance and start this one")
     tr.set_defaults(fn=cmd_tray)
+
+    bh = sub.add_parser("browser-host", help="Windows: register the helper the ShieldsVPN browser extension uses")
+    bh.add_argument("action", choices=["install", "uninstall"])
+    bh.add_argument("--chrome-id", action="append", help="extension id in Chrome / Edge / Brave / Opera (repeatable)")
+    bh.add_argument("--firefox-id", default="companion@shieldsvpn.app", help="Firefox add-on id ('' to skip)")
+    bh.add_argument("-c", "--config", help="profile to start the app with (default: this PC's registered device)")
+    bh.set_defaults(fn=cmd_browser_host)
+
+    nh = sub.add_parser("native-host", help=argparse.SUPPRESS)  # started by the browser, not by people
+    nh.add_argument("origin", nargs="*")
+    nh.set_defaults(fn=cmd_native_host)
 
     args = p.parse_args(argv)
     level = logging.WARNING if args.cmd in ("selftest",) and not args.verbose else \

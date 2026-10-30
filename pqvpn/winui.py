@@ -20,14 +20,14 @@ import ctypes
 import logging
 import logging.handlers
 import os
+import re
 import subprocess
 import sys
 import threading
 import time
 from ctypes import wintypes as wt
 
-from . import logo
-from .config import load_client
+from . import control, desktop_account, logo
 from .crypto.suites import describe_suite
 from .runner import run_client
 
@@ -115,7 +115,7 @@ STATE_TEXT = {
 }
 STATE_ICON = {"disconnected": "disconnected", "connecting": "connecting", "reconnecting": "connecting",
               "connected": "connected", "error": "error"}
-ID_CONNECT, ID_DISCONNECT, ID_PORTAL, ID_LOG, ID_EXIT = 1001, 1002, 1003, 1004, 1005
+ID_CONNECT, ID_DISCONNECT, ID_PORTAL, ID_LOG, ID_EXIT, ID_ACCOUNT = 1001, 1002, 1003, 1004, 1005, 1006
 # Windows attributes notifications to this ID; the Start-menu shortcut carries the
 # same ID, so the notification header reads "ShieldsVPN" with the shield icon.
 APP_ID = "PQVPN.PostQuantumVPN"
@@ -158,19 +158,30 @@ def relaunch_elevated(config_path: str, extra: str = "") -> bool:
     return (rc or 0) > 32
 
 
+WEB_URL = re.compile(r"https?://[^\s\"]+")
+
+
 def open_url(url: str) -> None:
-    # explorer.exe hands the URL to the user's (non-elevated) default browser
+    # explorer.exe hands the URL to the user's (non-elevated) default browser.  It would also open a file or start a
+    # program if given a path, and the portal address can come from the VPN server's push: web addresses only.
+    if not WEB_URL.fullmatch(url or ""):
+        log.warning("refused to open a non-web address")
+        return
     subprocess.Popen(["explorer.exe", url])
 
 
 class TrayApp:
     WM_TRAY = WM_APP + 1
     WM_STATE = WM_APP + 2
+    WM_CONTROL = WM_APP + 3   # a command from the browser extension (control.py), wparam = menu command id
     HEALTH_TIMER = 1
 
     def __init__(self, config_path: str, autoconnect: bool = True, icon_guid: str = ICON_GUID):
         self.config_path = os.path.abspath(config_path)
-        self.cfg = load_client(self.config_path)
+        self.cfg = desktop_account.load_config(self.config_path)
+        # A PC registered with the portal (Free with ads / Pro); None for a profile imported from a ZIP.
+        self.account = desktop_account.account_for_config(self.config_path)
+        self._free_timer: threading.Timer | None = None
         self.autoconnect = autoconnect
         # A GUID identity (NIF_GUID) is Microsoft's recommended way to identify a
         # notification icon: unlike (exe, uID) it cannot collide with other apps
@@ -189,6 +200,29 @@ class TrayApp:
         self.hwnd = None
         self._wndproc = WNDPROC(self._wndproc_impl)  # keep a reference: called from C
         self._hicons: dict[tuple[str, int], int] = {}
+        self.control: control.ControlServer | None = None
+
+    # -------------------------------------------------------------- browser extension (control.py)
+    def _control_command(self, cmd: str) -> dict:
+        """Runs on the VPN loop thread.  Connect/disconnect are handed to the UI thread, like menu clicks."""
+        if cmd in ("connect", "disconnect") and self.hwnd:
+            user32.PostMessageW(self.hwnd, self.WM_CONTROL, ID_CONNECT if cmd == "connect" else ID_DISCONNECT, 0)
+        with self._lock:
+            state, info = self.state, dict(self.info)
+        return {"state": state, "server": info.get("server", "") if state == "connected" else "",
+                "address": short_address(info.get("address", "")) if state == "connected" else "",
+                "encryption": friendly_suite(info.get("suite", "")) if state == "connected" else "",
+                "message": info.get("message", "")[:200] if state == "error" else "",
+                "account": self.account is not None}
+
+    def _start_control(self) -> None:
+        self.control = control.ControlServer(self._control_command, os.path.join(app_dir(), control.FILE),
+                                              {"config": self.config_path})
+        try:
+            asyncio.run_coroutine_threadsafe(self.control.start(), self.loop).result(timeout=5)
+        except Exception:  # noqa: BLE001 -- the VPN works without the browser companion
+            log.exception("browser control channel not started")
+            self.control = None
 
     # -------------------------------------------------------------- icons
     def _icon(self, state: str, large: bool = False) -> int:
@@ -256,11 +290,54 @@ class TrayApp:
         if self.future is not None and not self.future.done():
             return
         try:
-            self.cfg = load_client(self.config_path)  # pick up a newly downloaded profile
+            self.cfg = desktop_account.load_config(self.config_path)  # pick up a newly downloaded profile
         except Exception as exc:
             self._on_state("error", {"message": f"profile: {exc}"})
             return
+        if self.account is not None:
+            threading.Thread(target=self._connect_free_checked, name="free-time", daemon=True).start()
+            return
         self.future = asyncio.run_coroutine_threadsafe(self._client(), self.loop)
+
+    # -------------------------------------------------------------- Free plan (registered PCs)
+    def _free_seconds_left(self) -> float | None:
+        """Free time left by the server's clock; None = Pro, or the portal cannot be reached (the VPN server
+        still enforces the limit either way)."""
+        try:
+            me = self.account.me()
+        except Exception as exc:  # noqa: BLE001
+            log.info("plan status unavailable: %s", exc)
+            return None
+        if me.get("plan") == "premium":
+            return None
+        return me.get("free_until", 0) - me.get("now", time.time())
+
+    def _connect_free_checked(self) -> None:
+        left = self._free_seconds_left()
+        if left is not None and left <= 0:
+            self._on_state("error", {"message": "No free time left. Right-click the shield > Free time & Pro."})
+            return
+        self._schedule_free_stop(left)
+        self.future = asyncio.run_coroutine_threadsafe(self._client(), self.loop)
+
+    def _schedule_free_stop(self, left: float | None) -> None:
+        if self._free_timer is not None:
+            self._free_timer.cancel()
+        self._free_timer = None
+        if left is not None:
+            self._free_timer = threading.Timer(left + 1, self._free_time_up)
+            self._free_timer.daemon = True
+            self._free_timer.start()
+
+    def _free_time_up(self) -> None:
+        if self.future is None or self.future.done():
+            return  # already disconnected by the user
+        left = self._free_seconds_left()  # more time may have been earned meanwhile (another ad)
+        if left is not None and left <= 0:
+            self.disconnect()
+            self._on_state("error", {"message": "Your free time is over. Right-click the shield > Free time & Pro."})
+        else:
+            self._schedule_free_stop(left)
 
     async def _client(self) -> None:
         try:
@@ -331,6 +408,8 @@ class TrayApp:
         user32.AppendMenuW(menu, MF_STRING | (MF_GRAYED if busy else MF_DEFAULT), ID_CONNECT, "Connect")
         user32.AppendMenuW(menu, MF_STRING | (0 if busy else MF_GRAYED), ID_DISCONNECT, "Disconnect")
         user32.AppendMenuW(menu, MF_STRING | (0 if portal else MF_GRAYED), ID_PORTAL, "Open portal")
+        if self.account is not None:
+            user32.AppendMenuW(menu, MF_STRING, ID_ACCOUNT, "Free time && Pro…")
         user32.AppendMenuW(menu, MF_STRING, ID_LOG, "Open log")
         user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
         user32.AppendMenuW(menu, MF_STRING, ID_EXIT, "Exit")
@@ -350,6 +429,8 @@ class TrayApp:
             self.disconnect()
         elif cmd == ID_PORTAL and portal:
             open_url(portal)
+        elif cmd == ID_ACCOUNT:
+            subprocess.Popen([windowless_python(), "-m", "pqvpn", "app", "-c", self.config_path], cwd=project_root())
         elif cmd == ID_LOG:
             subprocess.Popen(["notepad.exe", os.path.join(app_dir(), "pqvpn-tray.log")])
         elif cmd == ID_EXIT:
@@ -378,6 +459,10 @@ class TrayApp:
             if msg == self.WM_STATE:
                 self._apply_state()
                 return 0
+            if msg == self.WM_CONTROL:
+                if wparam in (ID_CONNECT, ID_DISCONNECT):
+                    self._command(wparam)
+                return 0
             if msg == self._taskbar_created:  # Explorer restarted: the icon must be re-added
                 self._add_icon()
                 return 0
@@ -400,6 +485,8 @@ class TrayApp:
                 self.disconnect(wait=5)
                 return 0
             if msg == WM_DESTROY:
+                if self.control is not None:
+                    self.loop.call_soon_threadsafe(self.control.close)
                 self.disconnect(wait=8)
                 shell32.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(self._nid()))
                 user32.PostQuitMessage(0)
@@ -433,6 +520,7 @@ class TrayApp:
         if not self._add_icon():
             raise OSError(ctypes.get_last_error(), "Shell_NotifyIconW(NIM_ADD) failed")
         user32.SetTimer(self.hwnd, self.HEALTH_TIMER, 5000, None)
+        self._start_control()
         log.info("tray icon added; config %s", self.config_path)
         if self.autoconnect:
             self.connect()
@@ -457,18 +545,28 @@ def setup_logging() -> str:
     return path
 
 
+def ps_quote(text: str) -> str:
+    """A PowerShell single-quoted string literal: paths with an apostrophe (C:\\Users\\O'Brien) must not end it."""
+    return "'" + text.replace("'", "''") + "'"
+
+
+def shortcut_script(folder: str, target: str, args: str, icon: str, description: str) -> str:
+    """PowerShell that writes <folder>\\ShieldsVPN.lnk and prints its path.  Every value is quoted."""
+    return (f"$s=(New-Object -ComObject WScript.Shell);"
+            f"$d=[Environment]::GetFolderPath({ps_quote(folder)});"
+            f"$l=$s.CreateShortcut((Join-Path $d 'ShieldsVPN.lnk'));"
+            f"$l.TargetPath={ps_quote(target)};$l.Arguments={ps_quote(args)};"
+            f"$l.WorkingDirectory={ps_quote(project_root())};$l.IconLocation={ps_quote(icon + ',0')};"
+            f"$l.Description={ps_quote(description)};$l.Save();(Join-Path $d 'ShieldsVPN.lnk')")
+
+
 def install_shortcut(config_path: str) -> list[str]:
     """Create 'ShieldsVPN' shortcuts (Desktop + Start menu) with the shield icon."""
     icon = logo.ensure_icons(os.path.join(app_dir(), "icons"))["brand"]
     target, args = windowless_python(), f'-m pqvpn tray -c "{os.path.abspath(config_path)}"'
     created = []
     for folder in ("Desktop", "Programs"):
-        ps = (f"$s=(New-Object -ComObject WScript.Shell);"
-              f"$d=[Environment]::GetFolderPath('{folder}');"
-              f"$l=$s.CreateShortcut((Join-Path $d 'ShieldsVPN.lnk'));"
-              f"$l.TargetPath='{target}';$l.Arguments='{args.replace(chr(39), chr(39) * 2)}';"
-              f"$l.WorkingDirectory='{project_root()}';$l.IconLocation='{icon},0';"
-              f"$l.Description='Post-quantum VPN (ML-KEM / ML-DSA)';$l.Save();(Join-Path $d 'ShieldsVPN.lnk')")
+        ps = shortcut_script(folder, target, args, icon, "Post-quantum VPN (ML-KEM / ML-DSA)")
         out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
                              capture_output=True, text=True)
         if out.returncode == 0:

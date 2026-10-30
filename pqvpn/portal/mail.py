@@ -182,13 +182,13 @@ def verify_code_message(issuer: str, code: str, minutes: int) -> dict:
 def password_changed_message(issuer: str, username: str, ip: str, when: str) -> dict:
     e = html.escape
     text = (f"Hello {username},\n\nThe password of your {issuer} account was changed with an emailed reset "
-            f"code on {when} from IP address {ip}.\nAll signed-in sessions were signed out.\n\n"
+            f"code on {when} from IP address {ip}.\nAll signed-in sessions and apps were signed out.\n\n"
             "If this wasn't you, contact your administrator immediately.\n")
     return {"subject": f"Your {issuer} password was changed", "text": text,
             "html": _html(issuer, "Your password was changed", [
                 f"Hello <strong>{e(username)}</strong>,",
                 f"The password of your account was changed with an emailed reset code on {e(when)} "
-                f"from IP address {e(ip)}. All signed-in sessions were signed out.",
+                f"from IP address {e(ip)}. All signed-in sessions and apps were signed out.",
                 "<strong>If this wasn't you, contact your administrator immediately.</strong>"])}
 
 

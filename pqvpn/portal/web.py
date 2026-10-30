@@ -32,18 +32,19 @@ import json
 import logging
 import os
 import re
-import secrets
 import socket
 import ssl
 import threading
 import time
 import urllib.parse
 
-from .. import __version__, logo
+from .. import __version__, account_client, logo
 from ..config import PortalConfig
 from ..crypto.suites import describe_suite
 from ..protocol import RateLimiter
-from . import auth, firebase, mail, plans
+from . import accounts, api, auth, devices, firebase, google, mail, payments, plans, play, rewards
+from .accounts import (LOCK_SECONDS, MAX_FAILURES, REDACTED_ACTOR, RESET_MAX_ATTEMPTS, RESET_TTL,  # noqa: F401
+                       SIGNUP_TTL, USERNAME_RE, mask_email)
 from .qr import QrCode
 from .service import CA, issue_profile
 from .store import Store
@@ -51,20 +52,22 @@ from .vault import Vault
 
 log = logging.getLogger("pqvpn.portal")
 e = html.escape
-USERNAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,31}$")
-MAX_FAILURES, LOCK_SECONDS = 5, 15 * 60
-RESET_TTL, RESET_MAX_ATTEMPTS, RESET_RESEND_AFTER, RESET_MAX_PER_HOUR = 10 * 60, 5, 60, 5
 DEVICE_TTL = 60 * 24 * 3600  # a browser stays a "known device" (for lockout scoping) for 60 days
 # Settings sealed at rest with the vault (readable, so not hashable); re-sealed on start-up if found in plaintext.
-SECRET_SETTINGS = ("smtp_password",)
-REDACTED_ACTOR = "(unknown)"  # never store a typed login verbatim: it is sometimes a mistyped password
+SECRET_SETTINGS = ("smtp_password",) + payments.SECRET_SETTINGS
 # "admins": only administrators may sign in; "everyone": users also sign in to download their own profile.
 # allow_signup "1" turns on the public "Create account" (Free) + email verification + Premium upgrade flow.
 PORTAL_DEFAULTS = {"portal_access": "admins", "allow_signup": "0"}
-SIGNUP_TTL, SIGNUP_MAX_ATTEMPTS = 10 * 60, 5
 
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; "
        "form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+# Only the /pay/<code> page: Paddle's checkout (Paddle.js from its CDN, the card form in Paddle's own frame, which
+# Paddle styles inline).  Card details are typed into Paddle's frame, never into this portal.
+_PADDLE_CDN = "https://cdn.paddle.com https://sandbox-cdn.paddle.com"  # Paddle.js loads its sandbox assets from the latter
+PAY_CSP = (f"default-src 'none'; script-src 'self' {_PADDLE_CDN}; style-src 'self' 'unsafe-inline' {_PADDLE_CDN}; "
+           f"img-src 'self' data: {_PADDLE_CDN}; font-src {_PADDLE_CDN}; "
+           "frame-src https://buy.paddle.com https://sandbox-buy.paddle.com; connect-src 'self' https://*.paddle.com; "
+           "form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 SECURITY_HEADERS = [
     ("Content-Security-Policy", CSP),
     ("X-Content-Type-Options", "nosniff"),
@@ -92,11 +95,6 @@ def last_day(expires) -> str:
     return fmt_date(expires - 1) if expires else ""
 
 
-def mask_email(address: str) -> str:
-    local, _, domain = (address or "").partition("@")
-    return f"{local[:2]}***@{domain}" if domain else "-"
-
-
 def fmt_bytes(n) -> str:
     n = float(n or 0)
     for unit in ("B", "KB", "MB", "GB", "TB"):
@@ -117,12 +115,19 @@ class Portal:
         self.device_cookie_name = "__Host-pqvpn_device" if self.tls else "pqvpn_device"
         self.limiter = RateLimiter(rate=10 / 60, burst=10)
         self.limiter_lock = threading.Lock()
+        # Per enrolled device, for every authenticated app API call: 20 at once, then one every 3 s.  Without it a
+        # single (free, anonymous) device could loop on /renew, and each renewal costs an SLH-DSA signature.
+        self.device_limiter = RateLimiter(rate=1 / 3, burst=20)
         self.allowed_hosts = self._build_allowed_hosts()
         self._ca: CA | None = None
         self._ca_lock = threading.Lock()
         self.favicon = logo.render_ico("brand", sizes=(16, 32, 48))
         self.servers: list[http.server.ThreadingHTTPServer] = []
         self.mailer = mail.send  # (transport, message, timeout, allow_internal) -> info; tests swap in a fake
+        self.admob = rewards.AdMobVerifier()  # tests swap in one that serves their own key
+        self.payments = payments.Payments(self.store, self.settings)
+        self.play = play.PlayBilling(self.store, self.settings, os.path.join(data_dir, play.KEY_FILE),
+                                     self.vault.subkey("play-account"))
         self.mirror = firebase.Mirror(
             self.store, os.path.join(data_dir, firebase.KEY_FILE),
             self.settings, {"issuer": cfg.issuer, "server_name": cfg.server_name, "endpoint": cfg.endpoint,
@@ -156,7 +161,8 @@ class Portal:
             log.info("re-sealed %d plaintext secret(s) in the database", len(reseal))
 
     def settings(self) -> dict:
-        s = self.store.settings({**mail.DEFAULT_SETTINGS, **plans.DEFAULT_SETTINGS, **PORTAL_DEFAULTS})
+        s = self.store.settings({**mail.DEFAULT_SETTINGS, **plans.DEFAULT_SETTINGS, **PORTAL_DEFAULTS,
+                                 **devices.APP_DEFAULTS, **payments.DEFAULT_SETTINGS, **play.DEFAULT_SETTINGS})
         for k in SECRET_SETTINGS:
             if s.get(k):
                 try:
@@ -207,6 +213,10 @@ class Portal:
         with self.limiter_lock:
             return self.limiter.allow(ip, time.monotonic())
 
+    def allow_device(self, device_id: int) -> bool:
+        with self.limiter_lock:
+            return self.device_limiter.allow(f"device:{device_id}", time.monotonic())
+
     # -------------------------------------------------------------- serving
     def _bind_allowed(self, host: str) -> bool:
         ip = ipaddress.ip_address(host)
@@ -214,7 +224,27 @@ class Portal:
             return True
         return self.cfg.allow_insecure_http
 
+    def _public_names(self) -> list[str]:
+        """Configured names that mean the portal is reachable from the internet (a domain or a public IP)."""
+        names = [urllib.parse.urlsplit(self.cfg.public_url).hostname or "", *self.cfg.allowed_hosts]
+        public = []
+        for name in filter(None, (n.strip("[]").lower() for n in names)):
+            try:
+                if ipaddress.ip_address(name).is_global:
+                    public.append(name)
+            except ValueError:
+                if name != "localhost":
+                    public.append(name)
+        return public
+
     def start(self) -> list[str]:
+        # A tunnel agent (playit.gg, ngrok, ...) connects from loopback, which the listen check below allows; if the
+        # portal is published under a public name, plain HTTP would carry passwords across the internet.
+        exposed = self._public_names()
+        if exposed and not self.tls and not self.cfg.allow_insecure_http:
+            raise SystemExit(f"refusing to serve the portal over plain HTTP: it is published as {exposed[0]} "
+                             "(public_url / allowed_hosts). Configure tls_certificate/tls_private_key "
+                             "(see docs/APPS_SETUP.md), or set allow_insecure_http = true if you really mean it")
         urls = []
         for host, port in self.cfg.listen:
             if not self._bind_allowed(host):
@@ -298,6 +328,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._error(421, "This server does not answer to that host name.")
             url = urllib.parse.urlsplit(self.path)
             self.query = {k: v[0] for k, v in urllib.parse.parse_qs(url.query).items()}
+            if url.path.startswith(api.PREFIX):
+                return api.dispatch(self, method, url)  # JSON + bearer tokens; never uses the session cookie
             self.form: dict[str, str] = {}
             if method == "POST":
                 try:
@@ -405,10 +437,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.portal.store.audit(action, actor=name, ip=self.ip, detail=detail)
 
     # -------------------------------------------------------------- responses
-    def _send(self, status: int, body: bytes, ctype: str, headers: list[tuple[str, str]] = ()) -> None:
+    def _send(self, status: int, body: bytes, ctype: str, headers: list[tuple[str, str]] = (), csp: str = CSP) -> None:
         self.send_response(status)
         for k, v in SECURITY_HEADERS:
-            self.send_header(k, v)
+            self.send_header(k, csp if k == "Content-Security-Policy" else v)
         if self.portal.tls:
             self.send_header("Strict-Transport-Security", "max-age=31536000")
         self.send_header("Content-Type", ctype)
@@ -418,11 +450,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _html(self, title: str, content: str, status: int = 200, headers=()) -> None:
+    def _html(self, title: str, content: str, status: int = 200, headers=(), csp: str = CSP,
+              script: str = "/static/app.js") -> None:
         self._send(status, layout(self.portal, title, content, self.user if self.session and not
                                   self.session["pending_2fa"] else None,
-                                  self.session["csrf"] if self.session else "").encode(), "text/html; charset=utf-8",
-                   headers)
+                                  self.session["csrf"] if self.session else "", script).encode(),
+                   "text/html; charset=utf-8", headers, csp)
 
     def _json(self, status: int, data) -> None:
         self._send(status, json.dumps(data).encode(), "application/json")
@@ -472,7 +505,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 # ====================================================================== pages
 
-def layout(portal: Portal, title: str, content: str, user: dict | None, csrf: str) -> str:
+def layout(portal: Portal, title: str, content: str, user: dict | None, csrf: str,
+           script: str = "/static/app.js") -> str:
     nav = ""
     if user:
         # The admin area is deliberately not linked here; administrators reach it by typing /admin in the
@@ -493,7 +527,7 @@ def layout(portal: Portal, title: str, content: str, user: dict | None, csrf: st
 <main>{content}</main>
 <footer>{issuer} {__version__} &middot; ML-KEM-768 + X25519 key exchange &middot; ML-DSA-65 identities &middot;
 SLH-DSA root of trust</footer>
-<script src="/static/app.js"></script></body></html>"""
+<script src="{script}"></script></body></html>"""
 
 
 def _csrf_field(h: Handler) -> str:
@@ -559,7 +593,7 @@ def do_login(h: Handler) -> None:
         return page_login(h, "Too many attempts from your network. Wait a minute and try again.", 429)
     login = h.form.get("username", "").strip()[:254]  # username, or the account's email address
     password = h.form.get("password", "")[:auth.MAX_PASSWORD]
-    user = _find_account(store, login)
+    user = accounts.find_account(store, login)
     ok = auth.verify_password(password, user["password_hash"] if user else None)
     generic = "Incorrect username or password, or the account is locked or disabled."
     if user is None:
@@ -649,10 +683,9 @@ def do_2fa(h: Handler) -> None:
 
 # -------------------------------------------------------------------- forgot password (emailed code)
 
-def _find_account(store: Store, login: str) -> dict | None:
-    if "@" in login:
-        return store.user_by_email(login) if mail.valid_email(login) else None
-    return store.user_by_name(login) if USERNAME_RE.match(login) else None
+def _auditor(h: Handler):
+    """accounts.* report events through this; an empty actor means "the signed-in user, if any"."""
+    return lambda action, detail="", actor="": h._audit(action, detail, actor=actor or None)
 
 
 def page_forgot(h: Handler, error: str = "", status: int = 200) -> None:
@@ -672,41 +705,10 @@ value="{e(h.query.get('login', '')[:254])}"></label>
 
 
 def do_forgot(h: Handler) -> None:
-    store, portal = h.portal.store, h.portal
-    if not portal.allow_attempt(h.ip):
-        h._audit("password_reset_rate_limited", actor=REDACTED_ACTOR)
-        return page_forgot(h, "Too many attempts from your network. Wait a minute and try again.", 429)
     login = h.form.get("login", "").strip()[:254]
-    if not login:
-        return page_forgot(h, "Enter your username or email address.", 400)
-    user = _find_account(store, login)
-    code = f"{secrets.randbelow(10 ** 6):06d}"
-    code_hash = auth.hash_password(code)  # hashed even for unknown accounts: identical timing
-    now, reason = int(time.time()), ""
-    if user is None:
-        reason = "unknown account"
-    elif not user["enabled"]:
-        reason = "account disabled"
-    elif not portal.may_sign_in(user):
-        reason = "portal is restricted to administrators"
-    elif not user["email"]:
-        reason = "no email address on the account"
-    elif not mail.is_configured(portal.settings()):
-        reason = "email is not set up"
-    else:
-        recent = store.resets_since(user["id"], now - 3600)
-        if recent and now - recent[0]["created_at"] < RESET_RESEND_AFTER:
-            reason = "throttled: previous code sent under a minute ago"
-        elif len(recent) >= RESET_MAX_PER_HOUR:
-            reason = f"throttled: {RESET_MAX_PER_HOUR} codes in the last hour"
-    if reason:
-        h._audit("password_reset_not_sent", reason, actor=user["username"] if user else REDACTED_ACTOR)
-    else:
-        store.create_reset(user["id"], code_hash, RESET_TTL, h.ip)
-        h._audit("password_reset_requested", f"code emailed to {mask_email(user['email'])}", actor=user["username"])
-        portal.send_email_async(user["email"], mail.reset_code_message(
-            portal.cfg.issuer, user["username"], code, RESET_TTL // 60, h.ip), "password reset code",
-            user["username"], h.ip)
+    err = accounts.request_reset(h.portal, login, h.ip, _auditor(h), h.portal.may_sign_in)
+    if err:
+        return page_forgot(h, err[1], err[0])
     h._redirect("/forgot/verify?" + urllib.parse.urlencode({"login": login}))
 
 
@@ -733,52 +735,16 @@ maxlength="{auth.MAX_PASSWORD}"></label>
 
 
 def do_forgot_verify(h: Handler) -> None:
-    store, portal = h.portal.store, h.portal
-    if not portal.allow_attempt(h.ip):
-        return page_forgot_verify(h, "Too many attempts from your network. Wait a minute and try again.", 429)
-    login = h.form.get("login", "").strip()[:254]
-    code = auth.digits_only(h.form.get("code", ""))
-    user = _find_account(store, login)
-    reset = store.active_reset(user["id"]) if user and user["enabled"] else None
-    valid = auth.verify_password(code, reset["code_hash"] if reset else None) and len(code) == 6
-    invalid = "That code is not valid or has expired. Use the code from the latest email, or send a new code."
-    if not valid:
-        if reset:
-            store.reset_failed(reset["id"], RESET_MAX_ATTEMPTS)
-            h._audit("password_reset_code_failed", f"attempt {reset['attempts'] + 1} of {RESET_MAX_ATTEMPTS}",
-                     actor=user["username"])
-        return page_forgot_verify(h, invalid, 400)
-    new = h.form.get("new", "")
-    if new != h.form.get("confirm", ""):
-        return page_forgot_verify(h, "The new passwords do not match.", 400, code)
-    problems = auth.password_problems(new, user["username"])
-    if problems:
-        return page_forgot_verify(h, "New password " + "; ".join(problems) + ".", 400, code)
-    if not store.consume_reset(reset["id"]):  # lost a race with a parallel request: single use
-        return page_forgot_verify(h, invalid, 400)
-    store.update_user(user["id"], password_hash=auth.hash_password(new), must_change_password=0, failed_logins=0,
-                      locked_until=0)
-    store.delete_user_sessions(user["id"])
-    h._audit("password_reset_by_email", "all sessions signed out", actor=user["username"])
-    portal.send_email_async(user["email"], mail.password_changed_message(
-        portal.cfg.issuer, user["username"], h.ip, time.strftime("%Y-%m-%d %H:%M %Z")), "password changed notice",
-        user["username"], h.ip)
+    code = h.form.get("code", "")
+    _user, err, keep_code = accounts.complete_reset(
+        h.portal, h.form.get("login", "").strip()[:254], code, h.form.get("new", ""), h.form.get("confirm", ""),
+        h.ip, _auditor(h))
+    if err:
+        return page_forgot_verify(h, err[1], err[0], auth.digits_only(code) if keep_code else "")
     h._redirect("/login?reset=done", [h._cookie("", max_age=0)] if h.token else [])
 
 
 # -------------------------------------------------------------------- public sign-up (email + verification)
-
-def _signup_username(store: Store, email: str) -> str:
-    """A unique, valid username derived from the email's local part (it becomes the VPN certificate subject)."""
-    base = re.sub(r"[^A-Za-z0-9._-]", "", email.split("@")[0]).strip("._-")[:24] or "user"
-    if not base[0].isalnum():
-        base = "u" + base
-    base = base[:28] if len(base) >= 2 else "user"
-    name = base
-    while store.user_by_name(name):
-        name = f"{base}-{secrets.token_hex(2)}"[:32]
-    return name
-
 
 def page_signup(h: Handler, error: str = "", status: int = 200) -> None:
     if not h.portal.signup_enabled():
@@ -805,41 +771,13 @@ minlength="{auth.MIN_PASSWORD}" maxlength="{auth.MAX_PASSWORD}"></label>
 
 
 def do_signup(h: Handler) -> None:
-    portal, store = h.portal, h.portal.store
-    if not portal.signup_enabled():
+    if not h.portal.signup_enabled():
         return h._error(404, "Page not found.")
-    if not portal.allow_attempt(h.ip):
-        h._audit("signup_rate_limited", actor=REDACTED_ACTOR)
-        return page_signup(h, "Too many attempts from your network. Wait a minute and try again.", 429)
     email = h.form.get("email", "").strip().lower()[:254]
-    password = h.form.get("password", "")[:auth.MAX_PASSWORD]
-    if not mail.valid_email(email):
-        return page_signup(h, "Enter a valid email address.", 400)
-    if password != h.form.get("confirm", ""):
-        return page_signup(h, "The passwords do not match.", 400)
-    problems = auth.password_problems(password)
-    if problems:
-        return page_signup(h, "Password " + "; ".join(problems) + ".", 400)
-    if not mail.is_configured(portal.settings()):
-        return page_signup(h, "Sign-up by email is not available right now.", 503)
-    existing = store.user_by_email(email)
-    code = f"{secrets.randbelow(10 ** 6):06d}"
-    code_hash = auth.hash_password(code)  # the code is stored only hashed, like a password
-    msg = mail.verify_code_message(portal.cfg.issuer, code, SIGNUP_TTL // 60)
-    if existing is None:
-        username = _signup_username(store, email)
-        uid = store.create_user(username, "user", password, must_change=False)
-        store.update_user(uid, email=email, plan="free", email_verified=0)
-        store.create_reset(uid, code_hash, SIGNUP_TTL, h.ip)
-        h._audit("signup_started", f"email={mask_email(email)}", actor=username)
-        portal.send_email_async(email, msg, "sign-up verification", username, h.ip)
-    elif not existing["email_verified"]:  # re-signup of a not-yet-verified address: resend, adopt the new password
-        store.update_user(existing["id"], password_hash=auth.hash_password(password))
-        store.create_reset(existing["id"], code_hash, SIGNUP_TTL, h.ip)
-        h._audit("signup_resend", actor=existing["username"])
-        portal.send_email_async(email, msg, "sign-up verification", existing["username"], h.ip)
-    else:  # a verified account already exists: identical response, no email (no enumeration, no takeover)
-        h._audit("signup_existing", f"email={mask_email(email)}")
+    err = accounts.start_signup(h.portal, email, h.form.get("password", "")[:auth.MAX_PASSWORD],
+                                h.form.get("confirm", ""), h.ip, _auditor(h))
+    if err:
+        return page_signup(h, err[1], err[0])
     h._redirect("/signup/verify?" + urllib.parse.urlencode({"email": email}))
 
 
@@ -864,28 +802,12 @@ required maxlength="7" autofocus value="{e(code)}"></label>
 
 
 def do_signup_verify(h: Handler) -> None:
-    portal, store = h.portal, h.portal.store
-    if not portal.signup_enabled():
+    if not h.portal.signup_enabled():
         return h._error(404, "Page not found.")
-    if not portal.allow_attempt(h.ip):
-        return page_signup_verify(h, "Too many attempts from your network. Wait a minute and try again.", 429)
-    email = h.form.get("email", "").strip().lower()[:254]
-    code = auth.digits_only(h.form.get("code", ""))
-    user = store.user_by_email(email) if mail.valid_email(email) else None
-    reset = store.active_reset(user["id"]) if user and not user["email_verified"] else None
-    valid = auth.verify_password(code, reset["code_hash"] if reset else None) and len(code) == 6
-    invalid = "That code is not valid or has expired. Use the code from the latest email, or send a new one."
-    if not valid:
-        if reset:
-            store.reset_failed(reset["id"], SIGNUP_MAX_ATTEMPTS)
-            h._audit("signup_code_failed", f"attempt {reset['attempts'] + 1} of {SIGNUP_MAX_ATTEMPTS}",
-                     actor=user["username"])
-        return page_signup_verify(h, invalid, 400)
-    if not store.consume_reset(reset["id"]):  # single use; lost a race
-        return page_signup_verify(h, invalid, 400)
-    store.update_user(user["id"], email_verified=1, enabled=1)
-    h._audit("signup_verified", f"email={mask_email(email)}", actor=user["username"])
-    user = store.user(user["id"])
+    user, err = accounts.verify_signup(h.portal, h.form.get("email", "").strip().lower()[:254],
+                                       h.form.get("code", ""), h.ip, _auditor(h))
+    if err:
+        return page_signup_verify(h, err[1], err[0])
     _complete_login(h, user)  # creates the session and lands them on their dashboard
 
 
@@ -897,18 +819,135 @@ def page_upgrade(h: Handler) -> None:
         body = (f'<p class="alert ok">You are on <strong>Premium</strong>{until}. Thank you! \U0001F389</p>'
                 '<p>Enjoy ad-, tracker- and malware-blocking DNS and priority support.</p>')
     else:
-        body = """<ul class="muted" style="line-height:1.9">
+        body = f"""<ul class="muted" style="line-height:1.9">
 <li>\U0001F6E1️ Ad-, tracker- and malware-blocking DNS</li>
 <li>⚡ Priority connections</li>
 <li>\U0001F30D More locations as they launch</li></ul>
-<p><button class="btn primary wide" disabled>Upgrade to Premium</button></p>
-<p class="alert info small">Card payments are being set up. Until then, ask your administrator to switch your
-account to Premium.</p>"""
+{_upgrade_button(h)}"""
     h._html("Upgrade to Premium", f"""<h1 class="page">Upgrade to Premium</h1><div class="cols">
 <section class="card"><h2>Premium</h2>{body}</section>
 <section class="card"><h2>Your plan</h2><p>{_plan_badge(u)}</p>
 <p class="muted small">Signed in as {e(u['email'] or u['username'])}.</p>
 <p><a href="/">&larr; Back to dashboard</a></p></section></div>""")
+
+
+def _upgrade_button(h: Handler) -> str:
+    s = h.portal.settings()
+    if not payments.ready(s):
+        return ('<p><button class="btn primary wide" disabled>Upgrade to Premium</button></p>'
+                '<p class="alert info small">Card payments are being set up. Until then, ask your administrator to '
+                'switch your account to Premium.</p>')
+    default = payments.default_period(s)
+    choices = "".join(
+        f'<label class="choice"><input type="radio" name="period" value="{e(o["period"])}"'
+        f'{" checked" if o["period"] == default else ""}><span><strong>{e(o["name"])}</strong><br>'
+        f'<span class="muted small">{e(o["label"])}</span></span></label>' for o in payments.offers(s))
+    return (f'<form method="post" action="/upgrade/checkout">{_csrf_field(h)}{choices}'
+            '<button class="btn primary wide">Upgrade to Premium</button></form>'
+            '<p class="muted small">Payment is handled by Paddle, our reseller; card details go to Paddle, never to '
+            'this portal. Cancel any time.</p>')
+
+
+def do_upgrade_checkout(h: Handler) -> None:
+    u = h.user
+    if u["paddle_subscription_id"] and plans.effective_plan(u) == "premium":
+        return h._error(409, "You already have Premium. Manage the subscription from the app.")
+    if len(h.portal.store.open_pay_links(u["id"], time.time() - 3600)) >= payments.MAX_OPEN_CHECKOUTS:
+        return h._error(429, "Too many unfinished checkouts. Finish one, or try again in an hour.")
+    period = h.form.get("period", "") or payments.default_period(h.portal.settings())
+    try:
+        code = h.portal.payments.checkout(u, period)
+    except payments.PaymentError as exc:
+        h._audit("checkout_failed", exc.message)
+        return h._error(exc.status if exc.status < 500 else 503, f"Checkout is not available: {exc.message}.")
+    h._audit("checkout_started", f"web, {period}")
+    h._redirect(f"/pay/{code}")
+
+
+# -------------------------------------------------------------------- Paddle checkout page (payments.py)
+
+_PAY_CODE = r"[A-Za-z0-9_-]{20,64}"
+
+
+def page_pay(h: Handler, code: str) -> None:
+    """Opens Paddle's checkout for a transaction the portal created.  Public: the one-time code is the access."""
+    link = h.portal.payments.pay_link(code)
+    s = h.portal.settings()
+    if link is None or not payments.ready(s):
+        return h._error(404, "This payment link has expired. Start again from the app.")
+    if link["completed_at"]:
+        return h._redirect(f"/pay/{code}/done")
+    h._html("Checkout", f"""<section class="card narrow login" id="pay" data-token="{e(s['paddle_client_token'])}"
+data-env="{e(s['paddle_env'])}" data-txn="{e(link['txn_id'])}" data-done="/pay/{e(code)}/done">
+<div class="hero">{logo.svg("brand", 64, "pay-logo")}</div><h1>ShieldsVPN Pro</h1>
+<p class="muted">Opening the secure checkout&hellip;</p>
+<p class="muted small">Payment is processed by Paddle.com, our online reseller and merchant of record. Your card
+details go to Paddle only.</p>
+<p><button class="btn primary wide" id="pay-open">Open checkout</button></p></section>""",
+            csp=PAY_CSP, script="/static/pay.js")
+
+
+def page_pay_done(h: Handler, code: str) -> None:
+    link = h.portal.payments.pay_link(code)
+    if link is not None and h.portal.allow_attempt(h.ip):  # each visit asks Paddle's API: rate-limited
+        h.portal.payments.reconcile_user(link["user_id"])
+    h._html("Thank you", f"""<section class="card narrow login"><div class="hero">{logo.svg("brand", 64, "done")}</div>
+<h1>Thank you!</h1><p class="muted">Your payment is being confirmed. Go back to the ShieldsVPN app: Pro switches on
+within a minute.</p></section>""")
+
+
+# -------------------------------------------------------------------- Windows Free time: ad on a web page
+
+_NONCE = r"[A-Za-z0-9_-]{20,64}"
+
+
+def _web_reward(h: Handler, nonce: str) -> dict | None:
+    """The pending web-ad view for this nonce (devices.start_reward), if it is still usable."""
+    r = h.portal.store.reward_by_nonce(devices.nonce_hash(nonce))
+    if r is None or r["kind"] != "web" or r["granted_at"] or time.time() - r["created_at"] > 3600:
+        return None
+    return r
+
+
+def page_reward(h: Handler, nonce: str, error: str = "", status: int = 200) -> None:
+    """Shows the ad.  Free time is granted only after the server-measured minimum time (do_reward)."""
+    s = h.portal.settings()
+    r = _web_reward(h, nonce)
+    if r is None or not devices.enabled(s, "web_ads_enabled"):
+        return h._error(404, "This free-time link has expired. Start again from the ShieldsVPN app.")
+    h.portal.store.start_reward(r["id"], int(time.time()))
+    wait = devices.number(s, "reward_min_seconds")
+    if devices.enabled(s, "web_ads_test"):
+        ad = ('<div class="test-ad" role="img" aria-label="Test advertisement"><strong>TEST AD</strong><br>'
+              '<span class="muted small">No ad network is connected yet. A real ad appears here once one '
+              'is set up.</span></div>')
+    else:
+        ad = ('<p class="alert info">Ads are not set up on this server yet, so free time cannot be earned here. '
+              'Ask the administrator, or use the Android app.</p>')
+    msg = f'<p class="alert">{e(error)}</p>' if error else ""
+    h._html("Free time", f"""<section class="card narrow login" id="reward" data-wait="{wait}">
+<div class="hero">{logo.svg("brand", 64, "reward-logo")}</div><h1>Free VPN time</h1>
+<p class="muted">Keep this page open for {wait} seconds, then press the button to get
+{devices.number(s, "free_minutes")} minutes of ShieldsVPN.</p>{msg}{ad}
+<form method="post" action="/reward/{e(nonce)}"><button class="btn primary wide" id="reward-claim">Get my free time
+<span id="reward-left"></span></button></form></section>""", status, script="/static/reward.js")
+
+
+def do_reward(h: Handler, nonce: str) -> None:
+    s, now = h.portal.settings(), int(time.time())
+    if not h.portal.allow_attempt(h.ip):
+        return page_reward(h, nonce, "Too many attempts from your network. Wait a minute and try again.", 429)
+    r = _web_reward(h, nonce)
+    if r is None or not devices.enabled(s, "web_ads_enabled") or not devices.enabled(s, "web_ads_test"):
+        return h._error(404, "This free-time link has expired. Start again from the ShieldsVPN app.")
+    if not r["started_at"] or now - r["started_at"] < devices.number(s, "reward_min_seconds"):
+        return page_reward(h, nonce, "Please keep the page open a little longer.", 425)
+    until = devices.grant(h.portal.store, r, s, now)
+    if until is None:
+        return h._error(409, "This free time was already added, or today's limit is reached.")
+    h._html("Free time added", f"""<section class="card narrow login"><div class="hero">{logo.svg("brand", 64, "ok")}</div>
+<h1>Done!</h1><p class="muted">You have {devices.number(s, "free_minutes")} more minutes of ShieldsVPN. Go back
+to the app and press Connect.</p></section>""")
 
 
 def do_logout(h: Handler) -> None:
@@ -1053,11 +1092,13 @@ def do_password(h: Handler) -> None:
         return page_account(h, error="New password " + "; ".join(problems) + ".")
     h.portal.store.update_user(u["id"], password_hash=auth.hash_password(new), must_change_password=0)
     h.portal.store.delete_user_sessions(u["id"], keep_token=h.token)
-    h._audit("password_changed")
+    devices_out = h.portal.store.unlink_vpn_devices(u["id"])
+    h._audit("password_changed", f"{devices_out} app device(s) signed out" if devices_out else "")
     h.user = h.portal.store.user(u["id"])
     if u["must_change_password"]:
         return h._redirect("/")
-    page_account(h, message="Password changed. Your other sessions were signed out.")
+    page_account(h, message="Password changed. Your other sessions" +
+                 (" and the apps signed in to this account" if devices_out else "") + " were signed out.")
 
 
 def _email_problem(store: Store, address: str, user_id: int) -> str:
@@ -1232,8 +1273,13 @@ portal access and the audit log from here.</p>{_notices(notice, error)}
 <a class="tile" href="/admin/settings#access"><span class="tile-label">Portal sign-in</span>
 <strong>{access}</strong></a>
 <a class="tile" href="/admin/settings#firebase"><span class="tile-label">Firebase mirror</span>
-{_firebase_pill(h.portal.mirror.status())}</a></div>
+{_firebase_pill(h.portal.mirror.status())}</a>
+<a class="tile" href="/admin/devices"><span class="tile-label">App devices</span>
+<strong class="tile-num">{store.device_counts()["total"]}</strong>
+<span class="muted small">{"enrollment on" if devices.enabled(settings, "app_enrollment") else "enrollment off"}</span>
+</a></div>
 <div class="quick"><a class="btn primary" href="/admin#add">+ Add user</a>
+<a class="btn" href="/admin/devices">App devices</a><a class="btn" href="/admin/settings#apps">Apps: Free &amp; Pro</a>
 <a class="btn" href="/admin/settings#dns">Plans &amp; DNS</a><a class="btn" href="/admin/settings#email">Email setup</a>
 <a class="btn" href="/admin/settings#access">Portal access</a><a class="btn" href="/admin/settings#firebase">Firebase</a>
 <a class="btn" href="/admin/audit">Audit log</a></div>
@@ -1368,6 +1414,8 @@ def do_admin_create(h: Handler) -> None:
     role = form.get("role", "user")
     if not USERNAME_RE.match(username) or role not in ("user", "admin"):
         return page_admin_dashboard(h, error="Usernames are 2-32 characters: letters, digits, '.', '_' or '-'.")
+    if accounts.reserved_username(username):
+        return page_admin_dashboard(h, error="Usernames starting with 'd-' are reserved for app devices.")
     if store.user_by_name(username):
         return page_admin_dashboard(h, error=f"User {username} already exists.")
     email = form.get("email", "").strip()
@@ -1429,7 +1477,8 @@ def do_admin_action(h: Handler, user_id: str, action: str) -> None:
         store.update_user(target["id"], password_hash=auth.hash_password(password), must_change_password=1,
                           failed_logins=0, locked_until=0)
         store.delete_user_sessions(target["id"], keep_token=h.token if me else None)
-        h._audit("password_reset", f"user={name}")
+        store.unlink_vpn_devices(target["id"])
+        h._audit("password_reset", f"user={name}; app devices signed out")
         return done(_temp_password_notice(name, password))
     if action == "reset-2fa":
         store.update_user(target["id"], totp_enabled=0, totp_secret=None, totp_last_step=0)
@@ -1524,7 +1573,301 @@ value="{e(h.user['email'] or settings.get('smtp_user', ''))}"></label>
 <button class="btn">Send test email</button></form>
 <p class="muted small"><strong>Gmail:</strong> turn on 2-Step Verification for the account, then create an App
 Password at <code>myaccount.google.com/apppasswords</code> and paste the 16-letter code above. The normal Gmail
-password does not work for SMTP.</p></section></div>{_firebase_card(h)}""")
+password does not work for SMTP.</p></section></div>{_apps_card(h, settings)}{_payments_card(h, settings)}
+{_play_card(h, settings)}{_firebase_card(h)}""")
+
+
+# -------------------------------------------------------------------- admin: apps (Free with ads, Pro, devices)
+
+_APP_SWITCHES = (
+    ("app_enrollment", "Apps register themselves", "Phones and PCs get their own VPN certificate automatically on "
+     "first start: no profile file, no account. They start on Free."),
+    ("app_accounts", "Sign-in and sign-up in the apps", "People can create an account (email + password, verified "
+     "by an emailed code) or sign in from the app. Needed for Pro. Needs email set up."),
+    ("admob_enabled", "Android: rewarded video ads (Google AdMob)", "Free users watch a video ad to get free time."),
+    ("admob_require_ssv", "Only count an ad when Google confirms it", "Recommended. Turn off only for testing "
+     "without a public HTTPS address: the app's own report is then trusted, which a modified app can fake."),
+    ("web_ads_enabled", "Windows: ad on a web page", "The Windows app opens an ad page on this portal; free time "
+     "is granted after the minimum viewing time."),
+    ("web_ads_test", "Show a test ad on that page", "A clearly labelled placeholder instead of a real ad network, "
+     "for testing before you have one."),
+)
+_APP_NUMBERS = (
+    ("free_minutes", "Free minutes per ad"), ("free_daily_rewards", "Ads per device per day"),
+    ("reward_min_seconds", "Web ad: minimum seconds on the page"), ("pro_device_limit", "Devices per account"),
+    ("device_cleanup_days", "Forget unused anonymous devices after (days)"),
+    ("enroll_per_ip_day", "New devices per network per day"),
+)
+
+
+def _address_capacity(cfg) -> int:
+    net = ipaddress.ip_network(cfg.subnet)
+    return max(0, net.num_addresses - 2 - len(cfg.reserved_addresses))
+
+
+def _apps_card(h: Handler, settings: dict) -> str:
+    switches = "".join(
+        f'<label class="choice"><input type="checkbox" name="{k}"{" checked" if devices.enabled(settings, k) else ""}>'
+        f'<span><strong>{title}</strong><br><span class="muted small">{desc}</span></span></label>'
+        for k, title, desc in _APP_SWITCHES)
+    numbers = "".join(
+        f'<label>{label}<input name="{k}" type="number" min="{devices.LIMITS[k][0]}" max="{devices.LIMITS[k][1]}" '
+        f'required value="{devices.number(settings, k)}"></label>' for k, label in _APP_NUMBERS)
+    counts = h.portal.store.device_counts()
+    used = len([u for u in h.portal.store.users() if u["vpn_ip"]]) + counts["total"]
+    base = (h.portal.cfg.public_url or "https://<your portal address>/").rstrip("/") + "/"
+    return f"""<section class="card" id="apps"><h2>Apps: Free with ads &amp; Pro</h2>
+<p class="muted small">{counts['total']} app device(s), {counts['anonymous']} without an account.
+Tunnel addresses used: {used} of {_address_capacity(h.portal.cfg)} in <code>{e(h.portal.cfg.subnet)}</code>.
+Everything here is off until you turn it on. <a href="/admin/devices">See devices &rarr;</a></p>
+<form method="post" action="/admin/settings/apps">{_csrf_field(h)}{switches}
+<div class="form-grid">{numbers}</div><button class="btn primary">Save app settings</button></form>
+<p class="muted small">AdMob server-side verification URL (paste it in the AdMob console for your rewarded ad unit):
+<code>{e(base)}api/v1/admob/ssv</code>. Google can only call it once the portal has a public HTTPS address with
+a trusted certificate.</p></section>"""
+
+
+def do_admin_settings_apps(h: Handler) -> None:
+    values = {k: "1" if h.form.get(k) else "0" for k, _t, _d in _APP_SWITCHES}
+    for k, label in _APP_NUMBERS:
+        lo, hi = devices.LIMITS[k]
+        try:
+            n = int(h.form.get(k, ""))
+        except ValueError:
+            return page_admin_settings(h, error=f"{label}: enter a whole number.")
+        if not lo <= n <= hi:
+            return page_admin_settings(h, error=f"{label}: must be between {lo} and {hi}.")
+        values[k] = str(n)
+    h.portal.store.set_settings(values)
+    h._audit("app_settings_changed", "; ".join(f"{k}={v}" for k, v in values.items()))
+    note = "App settings saved."
+    if values["app_accounts"] == "1" and not mail.is_configured(h.portal.settings()):
+        note += " ⚠ Sign-up and password reset in the apps need email: set it up below."
+    if values["admob_enabled"] == "1" and values["admob_require_ssv"] == "0":
+        note += " ⚠ AdMob test mode is on: the app's report of a watched ad is trusted. Do not launch like this."
+    page_admin_settings(h, notice=note)
+
+
+def _payments_card(h: Handler, settings: dict) -> str:
+    on = " checked" if settings.get("payments_enabled") == "1" else ""
+    env = settings.get("paddle_env", "sandbox")
+    env_opts = "".join(f'<option value="{k}"{" selected" if k == env else ""}>{label}</option>'
+                       for k, label in (("sandbox", "Sandbox (test cards, no real money)"), ("live", "Live")))
+    pill = ('<span class="pill on">Ready</span>' if payments.ready(settings) else
+            '<span class="pill warn">Not set up</span>')
+    saved = "saved &ndash; leave empty to keep"
+    rows = "".join(f'<tr><td class="small">{e(fmt_time(p["created_at"]))}</td><td><code>{e(p["provider_ref"])}</code>'
+                   f'</td><td>{e(p["status"])}</td><td>{e(p["amount"] or "")} {e(p["currency"] or "")}</td></tr>'
+                   for p in h.portal.store.payments(limit=5))
+    recent = (f'<div class="table-wrap"><table><thead><tr><th>Time</th><th>Transaction</th><th>Status</th>'
+              f'<th>Amount</th></tr></thead><tbody>{rows}</tbody></table></div>') if rows else ""
+    base = (h.portal.cfg.public_url or "https://<your portal address>/").rstrip("/") + "/"
+    currency = settings.get("pro_currency", "USD")
+    currency_opts = "".join(f'<option value="{c}"{" selected" if c == currency else ""}>{c}</option>'
+                            for c in payments.CURRENCIES)
+    amounts = "".join(
+        f'<label>{name} price <span class="hint">({e(settings.get(f"paddle_price_{p}") or "not on sale")})</span>'
+        f'<input name="pro_price_{p}" inputmode="decimal" maxlength="12" placeholder="empty = not sold" '
+        f'value="{e(settings.get(f"pro_price_{p}", ""))}"></label>' for p, name in payments.PERIODS.items())
+    return f"""<section class="card" id="payments"><div class="card-head"><h2>Payments (Paddle)</h2>{pill}</div>
+<p class="muted small">People pay for Pro with a card on Paddle's checkout; Paddle is the merchant of record (tax,
+receipts, refunds). Pro switches on when the portal has checked the payment with Paddle's API.</p>
+<form method="post" action="/admin/settings/payments">{_csrf_field(h)}
+<label class="choice"><input type="checkbox" name="payments_enabled"{on}><span><strong>Sell Pro</strong><br>
+<span class="muted small">Shows "Go Pro" in the apps and on the Upgrade page.</span></span></label>
+<div class="form-grid"><label>Environment<select name="paddle_env">{env_opts}</select></label>
+<label>Product ID<input name="paddle_product_id" maxlength="80" placeholder="pro_..."
+value="{e(settings.get('paddle_product_id', ''))}"></label></div>
+<div class="form-grid"><label>Currency<select name="pro_currency">{currency_opts}</select></label>
+<label>Client-side token<input name="paddle_client_token" maxlength="80" placeholder="test_... or live_..."
+value="{e(settings.get('paddle_client_token', ''))}"></label></div>
+<div class="form-grid">{amounts}</div>
+<p class="muted small">Pro plans: leave a period empty to not sell it. On save the portal creates the prices at
+Paddle. A changed amount gets a new price and the old one is archived: people who already subscribe keep the price
+they signed up for.</p>
+<div class="form-grid"><label>API key<input name="paddle_api_key" type="password" maxlength="200" autocomplete="off"
+placeholder="{saved if settings.get('paddle_api_key') else 'Paddle API key'}"></label>
+<label>Webhook secret <span class="hint">(optional)</span><input name="paddle_webhook_secret" type="password"
+maxlength="200" autocomplete="off" placeholder="{saved if settings.get('paddle_webhook_secret') else 'pdl_ntfset_...'}">
+</label></div><button class="btn primary">Save payment settings</button></form>
+<p class="muted small">In Paddle: create one product (Catalog &rarr; Products, e.g. "ShieldsVPN Pro") and paste its
+ID above. Checkout settings &rarr; <em>Default payment link</em> = <code>{e(base)}pay</code>
+(live needs an approved domain). Webhook URL (needs a public HTTPS address):
+<code>{e(base)}api/v1/paddle/webhook</code>.</p>{recent}</section>"""
+
+
+def do_admin_settings_payments(h: Handler) -> None:
+    f, portal = h.form, h.portal
+    values = {"payments_enabled": "1" if f.get("payments_enabled") else "0",
+              "paddle_env": f.get("paddle_env", "sandbox"),
+              "paddle_product_id": f.get("paddle_product_id", "").strip(),
+              "pro_currency": f.get("pro_currency", "USD"),
+              "paddle_client_token": f.get("paddle_client_token", "").strip()}
+    if values["paddle_env"] not in payments.API_HOSTS:
+        return page_admin_settings(h, error="Choose sandbox or live.")
+    if values["paddle_product_id"] and not payments.PRODUCT_ID_RE.match(values["paddle_product_id"]):
+        return page_admin_settings(h, error="The product ID looks like pro_01h... (from Paddle > Catalog > Products).")
+    if values["pro_currency"] not in payments.CURRENCIES:
+        return page_admin_settings(h, error="Choose a currency.")
+    if values["paddle_client_token"] and not payments.CLIENT_TOKEN_RE.match(values["paddle_client_token"]):
+        return page_admin_settings(h, error="The client-side token starts with test_ or live_.")
+    for period, name in payments.PERIODS.items():
+        try:
+            values[f"pro_price_{period}"] = payments.normalize_amount(f.get(f"pro_price_{period}", ""),
+                                                                      values["pro_currency"])
+        except ValueError as exc:
+            return page_admin_settings(h, error=f"{name} price: {exc}.")
+    secrets = {k: f[k].strip()[:200] for k in payments.SECRET_SETTINGS if f.get(k, "").strip()}  # empty = keep
+    old = portal.settings()
+    new = {**old, **values, **secrets}
+    paddle = portal.payments.client_factory(new)
+    # Prices are created at Paddle before anything is stored: if Paddle refuses, the old settings stay as they were.
+    try:
+        prices, archive = payments.sync_prices(paddle, old, new)
+    except payments.PaymentError as exc:
+        h._audit("payment_settings_failed", exc.message)
+        return page_admin_settings(h, error=f"Nothing was saved: {exc.message}.")
+    portal.store.set_settings({**values, **prices, **{k: portal.vault.seal(k, v) for k, v in secrets.items()}})
+    stuck = []
+    for price_id in archive:
+        try:
+            paddle.archive_price(price_id)
+        except payments.PaymentError as exc:
+            log.warning("could not archive Paddle price %s: %s", price_id, exc.message)
+            stuck.append(price_id)
+    created = [v for p in payments.PERIODS if (v := prices[f"paddle_price_{p}"]) and v != old.get(f"paddle_price_{p}")]
+    h._audit("payment_settings_changed", f"enabled={values['payments_enabled']} env={values['paddle_env']} "
+             f"{values['pro_currency']} " + " ".join(f"{p}={values[f'pro_price_{p}'] or '-'}" for p in payments.PERIODS)
+             + f"; prices created {len(created)}, archived {len(archive) - len(stuck)}")
+    note = "Payment settings saved."
+    if created:
+        note += f" Created {len(created)} new price(s) at Paddle."
+    if stuck:
+        note += (f" ⚠ Paddle did not archive the old price(s) {e(', '.join(stuck))}; archive them in Paddle's "
+                 "catalog.")
+    if values["payments_enabled"] == "1" and not payments.ready(portal.settings()):
+        note += " ⚠ Selling is on, but the API key, client-side token or a price is missing."
+    page_admin_settings(h, notice=note)
+
+
+def _play_card(h: Handler, settings: dict) -> str:
+    on = " checked" if settings.get("play_enabled") == "1" else ""
+    key = h.portal.play.key()
+    pill = ('<span class="pill on">Ready</span>' if h.portal.play.ready(settings) else
+            '<span class="pill warn">Not set up</span>')
+    account = (f'<p class="muted small">Service account: <code>{e(key["client_email"])}</code></p>' if key else "")
+    return f"""<section class="card" id="play"><div class="card-head"><h2>Google Play Billing (Play Store app)</h2>{pill}</div>
+<p class="muted small">The Play Store build of the Android app must sell Pro through Google Play. The prices are the
+base plans of one subscription in Play Console; the portal checks every purchase with Google's API and makes the
+account Pro until the paid period ends. The website and the Windows app keep using Paddle.</p>{account}
+<form method="post" action="/admin/settings/play">{_csrf_field(h)}
+<label class="choice"><input type="checkbox" name="play_enabled"{on}><span><strong>Sell Pro in the Play app</strong>
+<br><span class="muted small">Shows the Google Play plans in the Play build of the app.</span></span></label>
+<div class="form-grid"><label>Package name<input name="play_package" maxlength="100" required
+value="{e(settings.get('play_package', ''))}"></label>
+<label>Subscription product ID<input name="play_product_id" maxlength="40" required
+value="{e(settings.get('play_product_id', ''))}"></label></div>
+<label>Service-account key (JSON) <span class="hint">(empty = keep the saved key)</span><textarea name="key_json"
+rows="4" spellcheck="false" autocomplete="off" placeholder='{{"type": "service_account", ...}}'></textarea></label>
+<button class="btn primary">Save Google Play settings</button></form>
+<p class="muted small">In Play Console: <em>Monetize &rarr; Subscriptions</em>: create the subscription with
+<code>weekly</code>, <code>monthly</code> and <code>yearly</code> base plans. <em>Users and permissions</em>: invite a
+Google Cloud service account with <em>View financial data</em> and <em>Manage orders and subscriptions</em>, then
+paste its JSON key here. The key is stored on this server only (file mode 0600) and never shown again.</p></section>"""
+
+
+def do_admin_settings_play(h: Handler) -> None:
+    f, portal = h.form, h.portal
+    values = {"play_enabled": "1" if f.get("play_enabled") else "0",
+              "play_package": f.get("play_package", "").strip(),
+              "play_product_id": f.get("play_product_id", "").strip()}
+    if not play.PACKAGE_RE.match(values["play_package"]):
+        return page_admin_settings(h, error="The package name looks like com.shieldsvpn.vpn.")
+    if not play.PRODUCT_RE.match(values["play_product_id"]):
+        return page_admin_settings(h, error="The product ID uses lowercase letters, digits, '_' and '.' only.")
+    key_text = f.get("key_json", "").strip()
+    if key_text:
+        try:
+            key = firebase.parse_key(key_text)
+            portal.play.client_factory(key).token()  # Google accepts the key before it is kept
+        except firebase.FirebaseError as exc:
+            return page_admin_settings(h, error=f"Google Play key: {exc}")
+        except google.GoogleError as exc:
+            return page_admin_settings(h, error=f"Google rejected the key: {exc}")
+        firebase.save_key(portal.play.key_path, key)
+    portal.store.set_settings(values)
+    h._audit("play_settings_changed", f"enabled={values['play_enabled']} package={values['play_package']} "
+             f"product={values['play_product_id']}" + (" (key replaced)" if key_text else ""))
+    note = "Google Play settings saved."
+    if values["play_enabled"] == "1" and not portal.play.ready():
+        note += " ⚠ Selling is on, but no service-account key is saved yet."
+    page_admin_settings(h, notice=note)
+
+
+def _device_plan(d: dict, users: dict, now: int) -> str:
+    user = users.get(d["user_id"])
+    if user and plans.effective_plan(user, now) == "premium":
+        return '<span class="badge premium">Pro</span>'
+    left = d["free_until"] - now
+    return ('<span class="badge free">Free</span> ' +
+            (f'<span class="small">{left // 60} min left</span>' if left > 0 else '<span class="muted small">no time</span>'))
+
+
+def page_admin_devices(h: Handler, notice: str = "", error: str = "") -> None:
+    store, now = h.portal.store, int(time.time())
+    users = {u["id"]: u for u in store.users()}
+    connected = {p["username"].lower() for p in store.peers()}
+    rows = []
+    for d in store.vpn_devices():
+        user = users.get(d["user_id"])
+        online = '<span class="dot on" title="connected"></span>' if d["subject"] in connected else \
+            '<span class="dot" title="not connected"></span>'
+        acts = []
+        for action, label, cls, confirm in (
+                ("signout", "Sign out", "", "Sign this device out of its account?") if user else (None,) * 4,
+                ("disable", "Disable", "danger", "Disable this device? It cannot connect until enabled again.")
+                if d["enabled"] else ("enable", "Enable", "", ""),
+                ("delete", "Delete", "danger", "Delete this device? The app will register again as a new device.")):
+            if action:
+                attr = f' data-confirm="{e(confirm)}"' if confirm else ""
+                acts.append(f'<form method="post" action="/admin/devices/{d["id"]}/{action}"{attr}>{_csrf_field(h)}'
+                            f'<button class="btn small {cls}">{label}</button></form>')
+        account = (f'<a href="/admin/users/{user["id"]}">{e(user["username"])}</a>' if user
+                   else '<span class="muted">anonymous</span>')
+        state = "" if d["enabled"] else ' <span class="pill warn">disabled</span>'
+        rows.append(f"""<tr><td>{online} <code>{e(d['subject'])}</code>{state}</td><td>{e(d['platform'])}</td>
+<td>{account}</td><td>{_device_plan(d, users, now)}</td><td><code>{e(d['vpn_ip'] or '-')}</code></td>
+<td class="small">{e(fmt_time(d['created_at']))}</td><td class="small">{e(fmt_time(d['last_seen']))}</td>
+<td><div class="acts">{''.join(acts)}</div></td></tr>""")
+    body = "".join(rows) or '<tr><td colspan="8" class="muted">No app devices yet.</td></tr>'
+    h._html("App devices", f"""<h1 class="page">App devices</h1>{_notices(notice, error)}
+<p class="muted lead">Phones and PCs that registered through the app. Free devices need watched ads for time;
+devices signed in to a Premium account are Pro. <a href="/admin/settings#apps">App settings &rarr;</a></p>
+<section class="card"><div class="table-wrap"><table><thead><tr><th>Device</th><th>Platform</th><th>Account</th>
+<th>Plan</th><th>VPN IP</th><th>Registered</th><th>Last connected</th><th>Actions</th></tr></thead>
+<tbody>{body}</tbody></table></div></section>""")
+
+
+def do_admin_device_action(h: Handler, device_id: str, action: str) -> None:
+    store = h.portal.store
+    d = store.vpn_device(int(device_id))
+    if d is None:
+        return page_admin_devices(h, error="No such device.")
+    name = d["subject"]
+    if action == "signout":
+        devices.unlink(store, d)
+        h._audit("device_signed_out", f"device={name}")
+        return page_admin_devices(h, f"{e(name)} signed out; it is a Free device again.")
+    if action in ("disable", "enable"):
+        store.update_vpn_device(d["id"], enabled=int(action == "enable"))
+        h._audit(f"device_{action}d", f"device={name}")
+        return page_admin_devices(h, f"{e(name)} {action}d." + (" Its VPN session ends within seconds."
+                                                                 if action == "disable" else ""))
+    if action == "delete":
+        store.delete_vpn_device(d["id"])
+        h._audit("device_deleted", f"device={name}")
+        return page_admin_devices(h, f"{e(name)} deleted; its VPN access ends within seconds.")
+    h._error(404, "Unknown action.")
 
 
 def _firebase_pill(st: dict) -> str:
@@ -1712,6 +2055,10 @@ def static_file(h: Handler, name: str) -> None:
         return h._send(200, STYLE.encode(), "text/css; charset=utf-8")
     if name == "app.js":
         return h._send(200, APP_JS.encode(), "text/javascript; charset=utf-8")
+    if name == "reward.js":
+        return h._send(200, REWARD_JS.encode(), "text/javascript; charset=utf-8")
+    if name == "pay.js":
+        return h._send(200, PAY_JS.encode(), "text/javascript; charset=utf-8")
     if name == "logo.svg":
         return h._send(200, logo.svg("brand").encode(), "image/svg+xml")
     h._error(404, "Not found.")
@@ -1743,6 +2090,13 @@ ROUTES = [
     ("GET", r"/signup/verify", "public", lambda h: page_signup_verify(h)),
     ("POST", r"/signup/verify", "public", do_signup_verify),
     ("GET", r"/upgrade", "user", page_upgrade),
+    ("POST", r"/upgrade/checkout", "user", do_upgrade_checkout),
+    ("GET", r"/reward/(?P<nonce>" + _NONCE + r")", "public", lambda h, nonce: page_reward(h, nonce)),
+    ("POST", r"/reward/(?P<nonce>" + _NONCE + r")", "public", do_reward),
+    ("GET", r"/pay/(?P<code>" + _PAY_CODE + r")", "public", page_pay),
+    ("GET", r"/pay/(?P<code>" + _PAY_CODE + r")/done", "public", page_pay_done),
+    ("POST", r"/admin/settings/payments", "admin", do_admin_settings_payments),
+    ("POST", r"/admin/settings/play", "admin", do_admin_settings_play),
     ("POST", r"/profile", "user", lambda h: do_profile(h)),
     ("GET", r"/api/status", "user", api_status),
     ("GET", r"/account", "user", lambda h: page_account(h)),
@@ -1764,6 +2118,10 @@ ROUTES = [
     ("POST", r"/admin/settings/dns", "admin", do_admin_settings_dns),
     ("POST", r"/admin/settings/email", "admin", do_admin_settings_email),
     ("POST", r"/admin/settings/email/test", "admin", do_admin_settings_email_test),
+    ("POST", r"/admin/settings/apps", "admin", do_admin_settings_apps),
+    ("GET", r"/admin/devices", "admin", lambda h: page_admin_devices(h)),
+    ("POST", r"/admin/devices/(?P<device_id>\d+)/(?P<action>signout|disable|enable|delete)", "admin",
+     do_admin_device_action),
     ("GET", r"/static/(?P<name>[a-z.]+)", "public", static_file),
     ("GET", r"/favicon.ico", "public", favicon),
 ]
@@ -1771,7 +2129,8 @@ ROUTES = [
 
 # ====================================================================== assets
 
-STYLE = """
+STYLE = """.test-ad{border:2px dashed #94a3b8;border-radius:12px;padding:46px 16px;margin:14px 0;text-align:center}
+
 :root{--bg:#f1f5f9;--card:#fff;--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--brand:#4f46e5;--brand2:#0891b2;
 --ok:#16a34a;--warn:#d97706;--bad:#dc2626;--radius:14px}
 *{box-sizing:border-box}html,body{margin:0}
@@ -1831,6 +2190,7 @@ h2.sub{font-size:14px;margin:18px 0 10px;color:var(--muted);text-transform:upper
 hr{border:0;border-top:1px solid var(--line);margin:16px 0 4px}.status-line{display:flex;gap:6px;flex-wrap:wrap}
 form.test{margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}
 input:disabled,select:disabled{background:#f8fafc;color:var(--muted)}
+.btn:disabled{opacity:.5;cursor:default}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:14px;margin-bottom:16px}
 .tile{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;display:flex;
 flex-direction:column;gap:6px;color:var(--ink);box-shadow:0 1px 2px rgba(15,23,42,.05)}
@@ -1840,6 +2200,50 @@ a.tile:hover{text-decoration:none;border-color:#a5b4fc}.tile .pill{align-self:fl
 .lead{margin:-8px 0 18px}main>.alert{margin:0 0 16px}.cols+.card{margin-top:20px}input.filter{max-width:300px;margin:0}tr[hidden]{display:none}
 label.choice{display:flex;gap:10px;align-items:flex-start;font-weight:400;font-size:14px;padding:10px 12px;
 border:1px solid var(--line);border-radius:10px;cursor:pointer}label.choice input{width:auto;margin:3px 0 0}
+"""
+
+# The checkout page (page_pay): Paddle.js opens Paddle's own checkout for the transaction the portal created.
+PAY_JS = r"""(function () {
+  var el = document.getElementById("pay");
+  if (!el) return;
+  var started = false;
+  function open() {
+    if (!window.Paddle) { setTimeout(open, 300); return; }
+    if (!started) {
+      started = true;
+      if (el.dataset.env === "sandbox") window.Paddle.Environment.set("sandbox");
+      window.Paddle.Initialize({
+        token: el.dataset.token,
+        eventCallback: function (ev) {
+          if (ev && ev.name === "checkout.completed") window.location.assign(el.dataset.done);
+        }
+      });
+    }
+    window.Paddle.Checkout.open({ transactionId: el.dataset.txn });
+  }
+  var s = document.createElement("script");
+  s.src = "https://cdn.paddle.com/paddle/v2/paddle.js";
+  s.onload = open;
+  document.head.appendChild(s);
+  document.getElementById("pay-open").addEventListener("click", open);
+})();
+"""
+
+# The web-ad page (page_reward): a countdown on the button.  Cosmetic only: the server measures the time itself.
+REWARD_JS = r"""(function () {
+  var el = document.getElementById("reward");
+  var btn = document.getElementById("reward-claim");
+  var left = document.getElementById("reward-left");
+  if (!el || !btn) return;
+  var n = parseInt(el.dataset.wait, 10) || 0;
+  btn.disabled = true;
+  (function tick() {
+    if (n <= 0) { btn.disabled = false; left.textContent = ""; return; }
+    left.textContent = " (" + n + ")";
+    n -= 1;
+    setTimeout(tick, 1000);
+  })();
+})();
 """
 
 APP_JS = r"""
@@ -1907,6 +2311,12 @@ def run_portal(cfg: PortalConfig) -> None:
         raise SystemExit(f"cannot load CA for profile issuance: {exc}")
     urls = portal.start()
     log.info("pqvpn portal listening on %s", ", ".join(urls))
+    if portal.tls:
+        with open(cfg.tls_certificate, encoding="ascii") as f:
+            pin = account_client.cert_pin(account_client.pem_to_der(f.read()))
+        log.info("TLS certificate pin for the apps (portalPin in android-app/deploy.properties): %s", pin)
+    portal.payments.start()
+    portal.play.start()
     if not portal.tls:
         log.info("plain HTTP is only served on loopback / VPN-tunnel addresses (configure TLS for anything else)")
     stop = threading.Event()
@@ -1920,4 +2330,6 @@ def run_portal(cfg: PortalConfig) -> None:
         pass
     finally:
         stop.set()
+        portal.payments.stop()
+        portal.play.stop()
         portal.stop()

@@ -21,7 +21,8 @@ SERVICE_ACCOUNT = re.compile(rb'"type"\s*:\s*"service_account".{0,4000}?"private
                              rb'"-----BEGIN [A-Z ]*PRIVATE KEY-----(?:\\n|\n)[A-Za-z0-9+/=]{40,}', re.S)
 PSK_LINE = re.compile(rb"^\s*[A-Za-z0-9+/]{43}=\s*$")  # exactly a base64-encoded 32-byte key (pqvpn genpsk)
 VAULT_SEAL = re.compile(rb"enc:v1:[A-Za-z0-9+/=]{40,}")
-SECRET_NAMES = re.compile(r"(^|/)(psk\.key|portal-secrets\.key|keystore\.properties|firebase-key[^/]*\.json)$|"
+SECRET_NAMES = re.compile(r"(^|/)(psk\.key|portal-secrets\.key|keystore\.properties|tray-control\.json|"
+                          r"(firebase|play)-key[^/]*\.json)$|"
                           r"\.(jks|keystore|db|db-wal)$", re.I)
 MAX_BYTES = 8 << 20
 

@@ -624,7 +624,10 @@ class TestPortalEndToEnd(unittest.IsolatedAsyncioTestCase):
         _, _, dash = b.get("/")
         self.assertIn(b"Welcome", dash)
         self.assertIn(b"/upgrade", dash)
-        self.assertIn(b"Upgrade to Premium", b.get("/upgrade")[2])
+        upgrade = b.get("/upgrade")[2]
+        self.assertIn(b"Upgrade to Premium", upgrade)
+        self.assertNotIn(b"_upgrade_button", upgrade)  # the button is rendered, not the template expression
+        self.assertIn(b"Card payments are being set up", upgrade)  # payments are not configured in this portal
 
         st, h, _ = Browser(self.port).login(email, pw)  # normal sign-in works now
         self.assertEqual((st, h["Location"]), (303, "/"))

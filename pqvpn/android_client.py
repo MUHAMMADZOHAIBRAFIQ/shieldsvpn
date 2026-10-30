@@ -17,6 +17,11 @@ entry points:
     Turns the server's *authenticated* configuration push into the exact interface settings that
     ``VpnService.Builder`` needs, after checking it against the client certificate.
 
+``enroll_json`` / ``renew_json`` / ``api_json``
+    The app API (Free with ads, sign-in, Pro): register this phone with the portal without an account, renew
+    its certificate, and make account calls.  The device key is generated here and only its public half is
+    sent; the key, PSK and device token go back to Kotlin to be sealed (see account_client.py).
+
 How the TUN interface is created
     ``VpnService.Builder.establish()`` needs the interface address, routes and DNS servers before it
     returns a TUN descriptor, but the server sends routes/DNS/prefix length only inside the encrypted,
@@ -256,6 +261,100 @@ def load_profile_summary(profile_dir: str) -> dict:
         return profile_summary(cfg, pki.Certificate.load(cfg.certificate))
     except (ConfigError, pki.CertError, OSError) as exc:
         raise ProfileError(f"The installed profile is damaged ({exc}). Import it again.") from None
+
+
+# ====================================================================== app enrollment and account API
+
+# The only API calls the Kotlin side may make through api_json (portal/api.py has the full list).
+API_PATHS = {
+    ("GET", "/api/v1/me"), ("POST", "/api/v1/login"), ("POST", "/api/v1/logout"), ("POST", "/api/v1/signup"),
+    ("POST", "/api/v1/signup/verify"), ("POST", "/api/v1/forgot"), ("POST", "/api/v1/forgot/verify"),
+    ("POST", "/api/v1/reward/start"), ("POST", "/api/v1/reward/claim"), ("POST", "/api/v1/checkout"),
+    ("POST", "/api/v1/manage"), ("POST", "/api/v1/play/verify"), ("POST", "/api/v1/account/delete"),
+}
+
+
+def _portal(base_url: str, pin: str, allow_http: bool):
+    from .account_client import PortalClient
+    return PortalClient(str(base_url), str(pin or ""), bool(allow_http))
+
+
+def _api_failure(exc: Exception) -> str:
+    from .account_client import PortalError
+    if isinstance(exc, PortalError):
+        return json.dumps({"ok": False, "status": exc.status, "code": exc.code, "error": exc.message})
+    if isinstance(exc, (ProfileError, ValueError)):
+        return json.dumps({"ok": False, "status": 0, "code": "bad_profile", "error": str(exc)})
+    raise exc
+
+
+def _install_enrolled(profile: dict, key_pem: str, dest_dir: str) -> dict:
+    """Write the public profile parts (like import_profile) and return the summary + secrets to seal."""
+    from . import pki
+    from .account_client import write_profile
+    os.makedirs(dest_dir, exist_ok=True)
+    if os.listdir(dest_dir):
+        raise ProfileError("internal error: profile staging directory is not empty")
+    psk_b64 = str(profile.get("psk") or "")
+    if psk_b64:
+        try:
+            if len(base64.b64decode(psk_b64, validate=True)) != 32:
+                raise ValueError
+        except ValueError:
+            raise ProfileError("The server sent an invalid pre-shared key.") from None
+    cfg = write_profile(profile, key_pem, dest_dir, key_file="device.key")  # the key itself stays sealed
+    summary = profile_summary(cfg, pki.Certificate.load(cfg.certificate))
+    summary["enrolled"] = True
+    summary["has_psk"] = bool(psk_b64)
+    return {"summary": summary, "secrets": {"key_pem": key_pem, "psk": psk_b64}}
+
+
+def enroll_json(base_url: str, pin: str, allow_http: bool, dest_dir: str) -> str:
+    """Register this phone with the portal: no account, starts on Free (portal/devices.py).
+
+    Generates the device key here, sends only its public half, writes the public profile into ``dest_dir`` and
+    returns {"ok": true, "summary", "secrets": {"key_pem", "psk"}, "token", "me"}; the caller seals secrets and
+    token with the Android Keystore.  On failure {"ok": false, "status", "code", "error"}.
+    """
+    from .account_client import DEFAULT_KEY_ALG, new_device_key
+    try:
+        key_pem, public_b64 = new_device_key(DEFAULT_KEY_ALG)
+        out = _portal(base_url, pin, allow_http).call("POST", "/api/v1/enroll", {
+            "platform": "android", "key_alg": DEFAULT_KEY_ALG, "public_key": public_b64})
+        token = out.get("token")
+        if not isinstance(token, str) or not 20 <= len(token) <= 100 or not isinstance(out.get("profile"), dict):
+            raise ProfileError("The server's answer is incomplete.")
+        return json.dumps({"ok": True, **_install_enrolled(out["profile"], key_pem, dest_dir), "token": token,
+                           "me": out.get("me")})
+    except Exception as exc:  # noqa: BLE001 -- _api_failure re-raises anything unexpected
+        return _api_failure(exc)
+
+
+def renew_json(base_url: str, pin: str, allow_http: bool, token: str, dest_dir: str) -> str:
+    """A fresh key and certificate for this device before the old certificate expires (same address)."""
+    from .account_client import DEFAULT_KEY_ALG, new_device_key
+    try:
+        key_pem, public_b64 = new_device_key(DEFAULT_KEY_ALG)
+        out = _portal(base_url, pin, allow_http).call("POST", "/api/v1/renew", {
+            "key_alg": DEFAULT_KEY_ALG, "public_key": public_b64}, token=str(token))
+        return json.dumps({"ok": True, **_install_enrolled(out["profile"], key_pem, dest_dir), "me": out.get("me")})
+    except Exception as exc:  # noqa: BLE001
+        return _api_failure(exc)
+
+
+def api_json(base_url: str, pin: str, allow_http: bool, token: str, method: str, path: str, body_json: str) -> str:
+    """One account/ads/payment call for the Kotlin side: {"ok": true, "data"} or {"ok": false, ...}."""
+    if (method, path) not in API_PATHS:
+        return json.dumps({"ok": False, "status": 0, "code": "bad_request", "error": "unsupported call"})
+    try:
+        body = json.loads(body_json) if body_json else None
+        if body is not None and not isinstance(body, dict):
+            raise ValueError("the request body must be a JSON object")
+        data = _portal(base_url, pin, allow_http).call(method, path, body if method == "POST" else None,
+                                                       token=str(token))
+        return json.dumps({"ok": True, "data": data})
+    except Exception as exc:  # noqa: BLE001
+        return _api_failure(exc)
 
 
 # ====================================================================== tunnel settings

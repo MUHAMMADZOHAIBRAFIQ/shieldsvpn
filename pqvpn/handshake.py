@@ -61,6 +61,9 @@ class HandshakeError(Exception):
 class Policy:
     suites: tuple[Suite, ...]      # preference order
     psk: bytes | None = None
+    # Responder only: with a PSK configured, also accept initiators that have none (PROTOCOL.md 5.3).  The
+    # responder derives both handshake key sets and keeps the one under which AUTH_I authenticates.
+    psk_optional: bool = False
 
 
 @dataclass
@@ -73,6 +76,7 @@ class Result:
     peer_cert: Certificate
     initiator: bool
     config: dict | None = None
+    psk_used: bool = False
 
 
 class Transcript:
@@ -280,27 +284,61 @@ class Initiator:
 
 # ------------------------------------------------------------------ responder
 
+@dataclass
+class _HandshakeKeys:
+    """One candidate handshake key set (with or without the PSK)."""
+    ks: KeySchedule
+    hs_i: bytes
+    hs_r: bytes
+    psk_used: bool
+    opener: ossl.AEAD
+
+
 class ResponderHandshake:
     """Responder state from RESPONSE until the session is confirmed."""
 
-    def __init__(self, responder: "Responder", suite: Suite, ks: KeySchedule, hs_i: bytes, hs_r: bytes,
-                 tr: Transcript, r_index: int, i_index: int, addr, now: float, m1_digest: bytes,
-                 m2_flight: list[bytes]):
-        self.responder, self.suite, self.ks, self.tr = responder, suite, ks, tr
-        self.hs_i, self.hs_r = hs_i, hs_r
+    def __init__(self, responder: "Responder", suite: Suite,
+                 candidates: list[tuple[KeySchedule, bytes, bytes, bool]], tr: Transcript, r_index: int,
+                 i_index: int, addr, now: float, m1_digest: bytes, m2_flight: list[bytes]):
+        self.responder, self.suite, self.tr = responder, suite, tr
         self.r_index, self.i_index, self.addr = r_index, i_index, addr
         self.created = now
         self.m1_digest = m1_digest
         self.m2_flight = m2_flight
         self.m3_digest: bytes | None = None
         self.m4_flight: list[bytes] | None = None
-        self._opener = ossl.AEAD(suite.aead, ks.key(hs_i), False)
+        self._keys = [_HandshakeKeys(ks, hs_i, hs_r, used, ossl.AEAD(suite.aead, ks.key(hs_i), False))
+                      for ks, hs_i, hs_r, used in candidates]
+        if len(self._keys) == 1:
+            self._select(self._keys[0])
         self._reasm: Reassembly | None = None
+
+    def _select(self, k: _HandshakeKeys) -> None:
+        self.ks, self.hs_i, self.hs_r, self.psk_used, self._opener = k.ks, k.hs_i, k.hs_r, k.psk_used, k.opener
+        self._keys = [k]
+
+    def _open_first(self, hdr: HsHeader, payload: bytes) -> bytes | None:
+        """Trial-decrypt the first AUTH_I fragment under each candidate key set; the one that authenticates wins.
+
+        Only with Policy.psk_optional.  The AEAD tag decides, and both key sets come from the same KEM/ECDH secrets,
+        so an attacker who cannot complete the key exchange can produce a valid fragment under neither.  A PSK
+        initiator's AUTH_I authenticates only under the PSK keys, so it keeps the PSK's protection.
+        """
+        nonce = fragment_nonce(MT_AUTH_I, hdr.frag_idx)
+        for k in self._keys:
+            chunk = k.opener.open(nonce, hdr.raw, payload)
+            if chunk is not None:
+                self._select(k)
+                return chunk
+        return None
 
     def on_auth_fragment(self, hdr: HsHeader, payload: bytes, now: float) -> tuple[list[bytes], Result | None]:
         if hdr.msg_type != MT_AUTH_I or hdr.sender != self.i_index:
             return [], None
-        chunk = self._opener.open(fragment_nonce(MT_AUTH_I, hdr.frag_idx), hdr.raw, payload)
+        if len(self._keys) > 1:
+            chunk = self._open_first(hdr, payload)
+        else:
+            chunk = self._opener.open(fragment_nonce(MT_AUTH_I, hdr.frag_idx), hdr.raw, payload)
         if chunk is None:
             return [], None
         if self._reasm is None:
@@ -347,7 +385,7 @@ class ResponderHandshake:
         i2r, r2i = self.ks.traffic(tr.hash(h))
         sealer = ossl.AEAD(suite.aead, self.ks.key(self.hs_r), True)
         self.m4_flight = fragment(MT_AUTH_R, self.r_index, self.i_index, m4, sealer.seal)
-        return Result(suite, self.r_index, self.i_index, r2i, i2r, cert, False, config)
+        return Result(suite, self.r_index, self.i_index, r2i, i2r, cert, False, config, self.psk_used)
 
 
 class Responder:
@@ -387,9 +425,13 @@ class Responder:
         tr = Transcript()
         tr.add(MT_INIT, hdr.sender, 0, body)
         tr.add(MT_RESPONSE, r_index, hdr.sender, m2)
-        ks = KeySchedule(h, suite.key_len, self.policy.psk)
-        hs_i, hs_r = ks.handshake(b"".join(p[1] for p in pairs), tr.hash(h))
+        ss, th = b"".join(p[1] for p in pairs), tr.hash(h)
+        candidates = []
+        psks = [self.policy.psk] + ([None] if self.policy.psk is not None and self.policy.psk_optional else [])
+        for psk in psks:  # PSK first: a PSK initiator authenticates only under these keys
+            ks = KeySchedule(h, suite.key_len, psk)
+            candidates.append((ks, *ks.handshake(ss, th), psk is not None))
         flight = fragment(MT_RESPONSE, r_index, hdr.sender, m2)
-        state = ResponderHandshake(self, suite, ks, hs_i, hs_r, tr, r_index, hdr.sender, addr, now,
+        state = ResponderHandshake(self, suite, candidates, tr, r_index, hdr.sender, addr, now,
                                    hashlib.sha256(body).digest(), flight)
         return flight, state

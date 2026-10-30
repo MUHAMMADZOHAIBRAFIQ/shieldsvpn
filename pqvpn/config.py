@@ -30,6 +30,8 @@ class CryptoConfig:
     ca_sig_algs: tuple[str, ...]
     psk: bytes | None
     rekey_interval: int
+    # Server only: also accept clients without the PSK (devices registered through the app API get none).
+    psk_optional: bool = False
 
 
 @dataclass
@@ -204,7 +206,7 @@ def _read_secret(path: str | None) -> bytes | None:
         return f.read().strip() or None
 
 
-def _crypto(sec: _Section) -> CryptoConfig:
+def _crypto(sec: _Section, server: bool = False) -> CryptoConfig:
     try:
         suites = tuple(suite_by_name(n) for n in sec.strs("suites", DEFAULT_SUITES))
         peer = tuple(sig_alg_by_name(n).name for n in sec.strs("peer_signature_algorithms", DEFAULT_PEER_SIG_ALGS))
@@ -223,8 +225,12 @@ def _crypto(sec: _Section) -> CryptoConfig:
         if len(psk) != 32:
             raise ConfigError("[crypto] PSK must be 32 bytes (use `pqvpn genpsk`)")
     rekey = sec.int("rekey_interval", 120, 30, 3600)
+    # Only the server reads psk_optional; in a client config the key stays unknown and is rejected below.
+    psk_optional = sec.bool("psk_optional", False) if server else False
+    if psk_optional and psk is None:
+        raise ConfigError("[crypto] psk_optional only makes sense together with psk_file")
     sec.check_unknown()
-    return CryptoConfig(suites, peer, ca, psk, rekey)
+    return CryptoConfig(suites, peer, ca, psk, rekey, psk_optional)
 
 
 def _load(path: str) -> tuple[dict[str, object], str]:
@@ -268,7 +274,7 @@ def load_server(path: str) -> ServerConfig:
         dns=_check_ips(t.strs("dns"), "[tunnel] dns"),
         push_routes=_check_nets(t.strs("push_routes"), "[tunnel] push_routes"),
         nat_interface=t.str("nat_interface", ""),
-        crypto=_crypto(_section(data, "crypto", base)),
+        crypto=_crypto(_section(data, "crypto", base), server=True),
         revoked={x.lower() for x in sec.strs("revoked_serials")},
         max_peers=sec.int("max_peers", 1024, 1, 1 << 20),
         cookie_threshold=sec.int("cookie_threshold", 64, 0, 1 << 20),
