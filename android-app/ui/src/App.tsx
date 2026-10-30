@@ -186,7 +186,7 @@ export function App({ bridge }: { bridge: Bridge }) {
 
       {menu && (
         <Menu account={account} hasProfile={state.profile !== null} imports={account.imports}
-          locked={state.active || state.importing} onClose={() => setMenu(false)} onPro={onPro}
+          locked={state.active || state.importing} connected={state.active} onClose={() => setMenu(false)} onPro={onPro}
           onWatchAd={() => bridge.send({ type: 'watchAd' })}
           onSignIn={() => openSheet('signIn', 'Pro is tied to an account. The Free plan needs none.')}
           onSignOut={() => bridge.send({ type: 'signOut' })}

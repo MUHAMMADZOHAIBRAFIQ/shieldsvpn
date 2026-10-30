@@ -3,9 +3,15 @@ import type { Account, AccountResult, Outbound, Period, PriceOption } from './br
 import { formatDate, formatDuration } from './format'
 import { IconClock, IconCrown, IconExternal, IconTick } from './icons'
 
-/** Free seconds left at `now`, counted down from when the app measured them. */
-export function freeLeft(a: Account, now: number): number {
-  return Math.max(0, a.freeSecondsLeft - Math.floor(Math.max(0, now - a.at) / 1000))
+/**
+ * Free seconds left at `now`.  Free time is a balance used up only while connected: it goes down only when
+ * `runningSince` (when the tunnel came up, Unix ms; 0 = not connected) is set, and only from the later of that
+ * moment and the measurement.
+ */
+export function freeLeft(a: Account, now: number, runningSince = 0): number {
+  if (!runningSince) return a.freeSecondsLeft
+  const from = Math.max(a.at, runningSince)
+  return Math.max(0, a.freeSecondsLeft - Math.floor(Math.max(0, now - from) / 1000))
 }
 
 /**
@@ -17,6 +23,10 @@ export function freeLeft(a: Account, now: number): number {
 export function PlanCard(props: {
   account: Account
   now: number
+  /** When the tunnel came up (Unix ms), 0 when not connected: Free time runs only while connected. */
+  runningSince?: number
+  /** A session is active: ads for free time are only for a disconnected VPN. */
+  connected?: boolean
   onWatchAd: () => void
   onGoPro: (period: Period | '') => void
   onChoosePlan?: () => void
@@ -27,7 +37,8 @@ export function PlanCard(props: {
 }) {
   const { account: a, now } = props
   const pro = a.plan === 'premium'
-  const left = freeLeft(a, now)
+  const running = (props.runningSince ?? 0) > 0
+  const left = freeLeft(a, now, props.runningSince ?? 0)
   const several = !pro && a.accounts && a.payments && a.prices.length > 1
   const sheet = several && props.onChoosePlan !== undefined
   const choosePlan = several && !sheet
@@ -36,8 +47,8 @@ export function PlanCard(props: {
     <section className={`card plan${pro ? ' plan--pro' : ''}`} aria-label="Your plan">
       <div className="plan__head">
         <h2>{pro ? 'ShieldsVPN Pro' : 'Free plan'}</h2>
-        <span className={`tag ${pro ? 'tag--ok' : left > 0 ? 'tag--warn' : 'tag--off'}`}>
-          {pro ? 'Unlimited' : left > 0 ? 'Time left' : 'No time left'}
+        <span className={`tag ${pro ? 'tag--ok' : left <= 0 ? 'tag--off' : running ? 'tag--ok' : 'tag--warn'}`}>
+          {pro ? 'Unlimited' : left <= 0 ? 'No time left' : running ? 'Running' : 'Paused'}
         </span>
       </div>
       {!a.known ? (
@@ -53,12 +64,14 @@ export function PlanCard(props: {
             <IconClock />
             <span className="mono">{formatDuration(left * 1000)}</span>
           </div>
+          <p className="note plan__rule">Free time is used only while you are connected.</p>
           {a.ads && (
-            <button type="button" className="btn btn--primary btn--wide" disabled={a.busy || a.rewardsLeft <= 0}
-              onClick={props.onWatchAd}>
+            <button type="button" className="btn btn--primary btn--wide"
+              disabled={a.busy || a.rewardsLeft <= 0 || props.connected} onClick={props.onWatchAd}>
               {a.busy ? 'Please wait…' : `Watch an ad · +${a.freeMinutes} min`}
             </button>
           )}
+          {a.ads && props.connected && <p className="note">Disconnect to watch an ad and add free time.</p>}
           {a.ads && a.rewardsLeft <= 0 && <p className="note">You used today's free sessions. Come back tomorrow, or go Pro.</p>}
           {!a.ads && <p className="note">Free time from ads is not available right now.</p>}
         </>

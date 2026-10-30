@@ -55,6 +55,8 @@ export interface MenuProps {
   /** Profile files may be imported (direct builds; the Play build only registers itself). */
   imports: boolean
   locked: boolean
+  /** The VPN is on: free time from ads is added only while it is off. */
+  connected?: boolean
   onClose: () => void
   onPro: (action: ProAction) => void
   onWatchAd: () => void
@@ -104,8 +106,9 @@ export function Menu(props: MenuProps) {
         </button>
 
         {free && a.ads && a.rewardsLeft > 0 && (
-          <MenuItem icon={<IconPlay />} label={`Get ${a.freeMinutes} free minutes`} detail="Watch a short ad"
-            disabled={a.busy} onClick={run(props.onWatchAd)} />
+          <MenuItem icon={<IconPlay />} label={`Get ${a.freeMinutes} free minutes`}
+            detail={props.connected ? 'Disconnect first' : 'Watch a short ad'}
+            disabled={a.busy || props.connected} onClick={run(props.onWatchAd)} />
         )}
 
         {a.available && a.known && a.accounts && (

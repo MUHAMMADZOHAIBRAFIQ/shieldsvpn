@@ -81,13 +81,12 @@ class TestDesktopAccount(unittest.TestCase):
         self.assertFalse(acct.me()["can_connect"])
         self.portal.store._exec("UPDATE reward_grants SET started_at = started_at - 10 WHERE nonce_hash = ?",
                                 (devices.nonce_hash(nonce),))
-        before = time.time()
         st, _, page = b.post(f"/reward/{nonce}", {})
         self.assertEqual(st, 200)
         self.assertIn(b"more minutes", page)
         me = acct.me()
         self.assertTrue(me["can_connect"])
-        self.assertAlmostEqual(me["free_until"], before + 1800, delta=5)
+        self.assertEqual(me["free_seconds"], 1800)
         self.assertEqual(b.post(f"/reward/{nonce}", {})[0], 404)  # single use
         self.assertEqual(b.get("/reward/" + "x" * 32)[0], 404)
         st, _, _ = b.post(f"/reward/{nonce}", {}, headers={"Origin": "https://evil.example"})

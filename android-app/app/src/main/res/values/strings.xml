@@ -34,6 +34,8 @@
     <string name="account_title">Account</string>
     <string name="free_time_title">Free time</string>
     <string name="no_free_time">You have no free time left. Watch a short ad to get %1$d minutes, or go Pro.</string>
+    <string name="ad_disconnect_first">Disconnect first. Free time is added while the VPN is off, and it is only used while you are connected.</string>
+    <string name="ad_still_closing">Your connection is still closing. Try again in a few seconds.</string>
     <string name="ad_not_confirmed">The ad was not confirmed yet. If your free time does not appear in a minute, try another ad.</string>
     <string name="go_pro">Go Pro</string>
     <string name="play_pending">Your payment is pending. Pro switches on as soon as Google Play confirms it.</string>

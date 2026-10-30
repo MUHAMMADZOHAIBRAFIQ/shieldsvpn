@@ -92,15 +92,35 @@ class MainActivity : AppCompatActivity() {
     private var playLoadedFor = ""
     private var playRestored = false
 
+    /** The user tapped Disconnect on a Free plan that shows an ad then; shown once the tunnel is down. */
+    private var adAfterDisconnect = false
+    /** When the last connect/disconnect interstitial was shown (SystemClock.elapsedRealtime), for the admin's gap. */
+    private var lastToggleAd = 0L
+    private var lastPhase: Phase? = null
+
     private val stateListener: (VpnUiState) -> Unit = { s ->
         pushState(s)
         val a = account
         if (s.phase == Phase.CONNECTED && s.connectedSince != adShownFor && accountAvailable && a != null &&
-            !a.pro && a.admob
+            a.toggleAd(connect = true)
         ) {
             adShownFor = s.connectedSince
-            if (skipNextInterstitial) skipNextInterstitial = false else Ads.showInterstitial(this)
+            if (skipNextInterstitial) skipNextInterstitial = false else showToggleAd(a)
         }
+        if (s.phase == Phase.DISCONNECTED && !s.active && lastPhase != null && lastPhase != Phase.DISCONNECTED) {
+            if (adAfterDisconnect && a != null) showToggleAd(a)
+            adAfterDisconnect = false
+            if (accountAvailable && termsAccepted) refreshAccount()   // the balance stopped going down
+        }
+        lastPhase = s.phase
+    }
+
+    /** One interstitial for a tap on Connect or Disconnect, unless the last one was within the admin's gap. */
+    private fun showToggleAd(a: AccountInfo) {
+        val now = SystemClock.elapsedRealtime()
+        if (lastToggleAd != 0L && now - lastToggleAd < a.toggleAdGap * 1000L) return
+        lastToggleAd = now
+        Ads.showInterstitial(this)
     }
 
     /** While the UI has a menu or sheet open, Back closes that instead of leaving the app. */
@@ -324,7 +344,10 @@ class MainActivity : AppCompatActivity() {
             }
             "disconnect" -> {
                 web?.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                if (VpnStateStore.state.active) ShieldsVpnService.disconnect(this)
+                if (VpnStateStore.state.active) {
+                    adAfterDisconnect = accountAvailable && account?.toggleAd(connect = false) == true
+                    ShieldsVpnService.disconnect(this)
+                }
             }
             "importProfile" -> if (!BuildConfig.PLAY_STORE) chooseProfile()   // Play build: registration only
             "removeProfile" -> removeProfile()
@@ -415,10 +438,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateAccount(me: JSONObject) {
+        // The server may still see a session that this phone has just closed: when the VPN is off here, the
+        // balance is not being used, whatever the answer says.
         val a = AccountInfo.fromMe(me, System.currentTimeMillis() / 1000)
+            .let { if (VpnStateStore.state.active) it else it.copy(freeCounting = false) }
         account = a
         pushAccount()
-        if (VpnStateStore.state.active) ShieldsVpnService.updateFreeTime(this, a.stopAtMs())
+        if (VpnStateStore.state.active) ShieldsVpnService.updateFreeTime(this, a.stopAtMs(System.currentTimeMillis()))
         if (a.renewCertificate && !VpnStateStore.state.active) renewCertificate()
         if (BuildConfig.PLAY_STORE && a.play) startPlay(a)
     }
@@ -526,6 +552,10 @@ class MainActivity : AppCompatActivity() {
             notice(false, getString(R.string.free_time_title), "Free time from ads is not available right now.")
             return
         }
+        if (VpnStateStore.state.active) {   // the server refuses it too: time is added while disconnected
+            notice(false, getString(R.string.free_time_title), getString(R.string.ad_disconnect_first))
+            return
+        }
         accountBusy = true
         pushAccount()
         io.execute {
@@ -536,7 +566,10 @@ class MainActivity : AppCompatActivity() {
                 start.onFailure { e ->
                     accountBusy = false
                     pushAccount()
-                    notice(false, getString(R.string.free_time_title), e.message ?: Redact.pythonError(e))
+                    // Right after Disconnect the server can still be seeing the last packets for a few seconds.
+                    val text = if ((e as? PortalException)?.code == "connected" && !VpnStateStore.state.active)
+                        getString(R.string.ad_still_closing) else e.message ?: Redact.pythonError(e)
+                    notice(false, getString(R.string.free_time_title), text)
                 }.onSuccess { r ->
                     val nonce = r.getString("nonce")
                     Ads.showRewarded(this, nonce, name) { earned, error ->
@@ -546,7 +579,7 @@ class MainActivity : AppCompatActivity() {
                             notice(false, getString(R.string.free_time_title),
                                 error ?: "Watch the whole ad to get free time.")
                         } else {
-                            collectReward(nonce, a.freeUntil, a.admobVerified, connectAfter)
+                            collectReward(nonce, a.freeSeconds, a.admobVerified, connectAfter)
                         }
                     }
                 }
@@ -566,7 +599,7 @@ class MainActivity : AppCompatActivity() {
                 for (attempt in 0 until 10) {   // Google usually calls back within a few seconds
                     Thread.sleep(2000)
                     val m = runCatching { Portal.call(applicationContext, "GET", "/api/v1/me") }.getOrNull()
-                    if (m != null && m.optLong("free_until") > before) {
+                    if (m != null && AccountInfo.balance(m) > before) {
                         me = m
                         break
                     }
@@ -685,7 +718,7 @@ class MainActivity : AppCompatActivity() {
     private fun startVpn() {
         VpnStateStore.update { VpnUiState(Phase.PREPARING, active = true) }
         val a = account
-        ShieldsVpnService.connect(this, if (accountAvailable && a != null) a.stopAtMs() else 0L)
+        ShieldsVpnService.connect(this, if (accountAvailable && a != null) a.stopAtMs(System.currentTimeMillis()) else 0L)
     }
 
     private fun chooseProfile() {

@@ -16,7 +16,12 @@ data class PriceOption(val period: String, val name: String, val label: String)
  */
 data class AccountInfo(
     val plan: String = "free",
-    val freeUntil: Long = 0,
+    /** Free time left when the portal answered, in seconds: a balance that is used up only while connected. */
+    val freeSeconds: Long = 0,
+    /** The server was using up that balance when it answered (this device was connected). */
+    val freeCounting: Boolean = false,
+    /** When the portal answered, on the phone's clock (seconds). */
+    val measuredAt: Long = 0,
     val proUntil: Long? = null,
     val email: String = "",
     val signedIn: Boolean = false,
@@ -33,21 +38,28 @@ data class AccountInfo(
     /** Pro plans on sale (weekly / monthly / yearly); empty = the portal's single default plan. */
     val prices: List<PriceOption> = emptyList(),
     val renewCertificate: Boolean = false,
-    /** Server clock minus phone clock, seconds: free time is judged by the server's clock. */
-    val clockSkew: Long = 0,
     /** Google Play Billing is set up on the portal (Play Store build). */
     val play: Boolean = false,
     /** The Play subscription's product id, and this account's obfuscated reference for purchases (signed in only). */
     val playProduct: String = "",
     val playAccount: String = "",
+    /** Free devices: interstitial "connect" (after connecting), "both" (also after disconnecting) or "off". */
+    val toggleAds: String = "connect",
+    /** At least this many seconds between two such interstitials (0 = every time). */
+    val toggleAdGap: Int = 0,
 ) {
     val pro get() = plan == "premium"
 
-    /** Free time left now, in seconds (by the server's clock). */
-    fun freeSecondsLeft(phoneNowSec: Long): Long = maxOf(0, freeUntil - (phoneNowSec + clockSkew))
+    /** Free time left now, in seconds: it went down since the answer only if the server was counting then. */
+    fun freeSecondsLeft(phoneNowSec: Long): Long =
+        if (freeCounting) maxOf(0, freeSeconds - maxOf(0, phoneNowSec - measuredAt)) else freeSeconds
 
-    /** When the server will stop a Free session, on the phone's clock (ms); 0 = no limit (Pro). */
-    fun stopAtMs(): Long = if (pro) 0 else (freeUntil - clockSkew) * 1000
+    /** When a Free session that is connected now runs out, on the phone's clock (ms); 0 = no limit (Pro). */
+    fun stopAtMs(phoneNowMs: Long): Long = if (pro) 0 else phoneNowMs + freeSecondsLeft(phoneNowMs / 1000) * 1000
+
+    /** Show an interstitial for a tap on Connect ([connect] = true) or Disconnect, as the administrator set it. */
+    fun toggleAd(connect: Boolean): Boolean =
+        !pro && admob && (toggleAds == "both" || (connect && toggleAds == "connect"))
 
     /**
      * Connect needs an ad first: Free with no time left, and today's rewarded ads are not used up.  The UI says so
@@ -62,7 +74,10 @@ data class AccountInfo(
             val play = me.optJSONObject("play")
             return AccountInfo(
                 plan = if (me.optString("plan") == "premium") "premium" else "free",
-                freeUntil = me.optLong("free_until"),
+                freeSeconds = balance(me),
+                // A portal from before the balance sends only an end time on its clock, which always runs.
+                freeCounting = if (me.has("free_seconds")) me.optBoolean("free_counting") else true,
+                measuredAt = phoneNowSec,
                 proUntil = if (me.isNull("pro_until")) null else me.optLong("pro_until"),
                 email = account?.optString("email").orEmpty().ifBlank { account?.optString("username").orEmpty() },
                 signedIn = account != null,
@@ -77,12 +92,19 @@ data class AccountInfo(
                 priceLabel = me.optString("price_label"),
                 prices = prices(me.optJSONArray("prices")),
                 renewCertificate = me.optJSONObject("device")?.optBoolean("renew") ?: false,
-                clockSkew = if (me.has("now")) me.optLong("now") - phoneNowSec else 0,
                 play = f.optBoolean("play"),
                 playProduct = play?.optString("product").orEmpty().take(40),
                 playAccount = play?.optString("account").orEmpty().take(64),
+                toggleAds = f.optString("toggle_ads", "connect").takeIf { it in TOGGLE_ADS } ?: "connect",
+                toggleAdGap = f.optInt("toggle_ad_gap", 0).coerceIn(0, 3600),
             )
         }
+
+        private val TOGGLE_ADS = setOf("connect", "both", "off")
+
+        /** The Free-time balance in a /me answer (seconds); from the end time for portals before the balance. */
+        fun balance(me: JSONObject): Long = if (me.has("free_seconds")) maxOf(0, me.optLong("free_seconds"))
+            else maxOf(0, me.optLong("free_until") - me.optLong("now", me.optLong("free_until")))
 
         private val PERIODS = setOf("week", "month", "year")
 

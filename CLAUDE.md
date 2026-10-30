@@ -72,6 +72,7 @@ pqvpn/portal/rewards.py   AdMob server-side-verification signature check
 pqvpn/portal/payments.py  Paddle Billing: checkout links, reconcile from Paddle's API, webhooks
 pqvpn/portal/play.py      Google Play Billing for the Play build: purchase-token checks with Google's API, reconcile
 pqvpn/portal/google.py    Google service-account sign-in (JWT bearer) shared by firebase.py and play.py
+pqvpn/portal/products.py  admin pages' Website / Browser extension / App data: settings, page check, manifest
 pqvpn/control.py          tray app's loopback control channel (token) for the browser extension
 pqvpn/native_host.py      browser native-messaging host + per-user registration (`pqvpn browser-host install`)
 browser-extension/        MV3 companion extension (nativeMessaging only); `tools/build_extension.py` builds store ZIPs

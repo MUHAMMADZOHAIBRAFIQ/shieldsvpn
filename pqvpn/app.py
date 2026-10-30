@@ -290,9 +290,15 @@ class ShieldsApp:
         threading.Thread(target=run, name="shieldsvpn-portal", daemon=True).start()
 
     def _free_left(self) -> float:
+        """Free time left: a balance used up only while connected (counted from the later of the server's answer
+        and the connection's start).  Portals before the balance send only an end time on the clock."""
         me = self.me or {}
-        server_now = me.get("now", time.time()) + (time.time() - self.me_at)
-        return me.get("free_until", 0) - server_now
+        if "free_seconds" not in me:
+            server_now = me.get("now", time.time()) + (time.time() - self.me_at)
+            return me.get("free_until", 0) - server_now
+        if self.state != "connected" or not self.connected_at:
+            return me["free_seconds"]
+        return me["free_seconds"] - (time.time() - max(self.me_at, self.connected_at))
 
     def _is_pro(self) -> bool:
         return bool(self.me) and self.me.get("plan") == "premium"
@@ -356,14 +362,18 @@ class ShieldsApp:
         self._say(f"{title}: {getattr(err, 'message', None) or err}")
 
     def watch_ad(self) -> None:
-        before = (self.me or {}).get("free_until", 0)
+        if self.state in ("connected", "connecting"):
+            return self._say("Disconnect first: free time is added while the VPN is off, and only used while "
+                             "you are connected.")
+        field = "free_seconds" if "free_seconds" in (self.me or {}) else "free_until"
+        before = (self.me or {}).get(field, 0)
 
         def done(url, err):
             if err is not None:
                 return self._fail("Free time", err)
             open_url(url)
             self._say("Keep the ad page open until its button unlocks, press it, then come back.", 120)
-            self.root.after(5000, lambda: self._poll_me(time.time() + 180, before))
+            self.root.after(5000, lambda: self._poll_me(time.time() + 180, before, field))
         self.bg(self.account.web_reward_url, done)
 
     def go_pro(self) -> None:

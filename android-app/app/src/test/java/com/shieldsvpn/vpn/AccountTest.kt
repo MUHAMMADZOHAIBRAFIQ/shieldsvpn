@@ -9,13 +9,16 @@ import org.junit.Test
 
 class AccountTest {
     // The shape pqvpn/portal/devices.py `state()` returns for GET /api/v1/me.
-    private fun me(plan: String = "free", freeUntil: Long = 1_000_600, now: Long = 1_000_000, account: Boolean = false) =
+    private fun me(plan: String = "free", freeSeconds: Long = 600, counting: Boolean = false, now: Long = 1_000_000,
+                   account: Boolean = false, toggleAds: String = "connect", gap: Int = 0) =
         JSONObject(
-            """{"now": $now, "plan": "$plan", "free_until": $freeUntil, "pro_until": ${if (plan == "premium") 1_900_000 else "null"},
+            """{"now": $now, "plan": "$plan", "free_seconds": $freeSeconds, "free_counting": $counting,
+               "free_until": ${now + freeSeconds}, "pro_until": ${if (plan == "premium") 1_900_000 else "null"},
                "can_connect": true, "reason": "", "free_minutes": 30, "rewards_left_today": 12,
                "account": ${if (account) """{"username": "sam", "email": "sam@example.com"}""" else "null"},
                "device": {"subject": "d-abc", "renew": false},
-               "features": {"accounts": true, "admob": true, "admob_verified": false, "web_ads": false, "payments": true},
+               "features": {"accounts": true, "admob": true, "admob_verified": false, "web_ads": false, "payments": true,
+                            "toggle_ads": "$toggleAds", "toggle_ad_gap": $gap},
                "price_label": "USD 4.99 / month",
                "prices": [{"period": "week", "name": "Weekly", "amount": "1.99", "currency": "USD", "label": "USD 1.99 / week"},
                           {"period": "month", "name": "Monthly", "label": "USD 4.99 / month"},
@@ -24,13 +27,24 @@ class AccountTest {
         )
 
     @Test
-    fun freeTimeIsJudgedByTheServerClock() {
-        // The phone's clock is 100 s behind the server: 600 s granted at server time 1_000_000.
-        val a = AccountInfo.fromMe(me(), phoneNowSec = 999_900)
-        assertEquals(100L, a.clockSkew)
-        assertEquals(600L, a.freeSecondsLeft(999_900))
-        assertEquals(0L, a.freeSecondsLeft(1_000_600))
-        assertEquals((1_000_600L - 100) * 1000, a.stopAtMs())   // the service stops on the phone's clock
+    fun freeTimeIsABalanceUsedOnlyWhileConnected() {
+        // Disconnected: 600 s stay 600 s however long the phone waits.
+        val paused = AccountInfo.fromMe(me(freeSeconds = 600), phoneNowSec = 5_000)
+        assertEquals(600L, paused.freeSecondsLeft(5_000))
+        assertEquals(600L, paused.freeSecondsLeft(90_000))
+        assertEquals(10_000_000L + 600_000, paused.stopAtMs(10_000_000))   // connecting now: it runs out in 600 s
+        // Connected when the server answered: the balance goes down from that moment.
+        val running = AccountInfo.fromMe(me(freeSeconds = 600, counting = true), phoneNowSec = 5_000)
+        assertEquals(500L, running.freeSecondsLeft(5_100))
+        assertEquals(0L, running.freeSecondsLeft(9_000))
+        assertEquals(5_100_000L + 500_000, running.stopAtMs(5_100_000))
+        // A portal from before the balance: only an end time on its clock (always running).
+        val old = AccountInfo.fromMe(JSONObject("""{"now": 1000, "free_until": 1300, "plan": "free"}"""), 50)
+        assertEquals(300L, old.freeSecondsLeft(50))
+        assertEquals(200L, old.freeSecondsLeft(150))
+        assertEquals(0L, AccountInfo.balance(JSONObject("""{"now": 1000, "free_until": 900}""")))
+        assertEquals(42L, AccountInfo.balance(JSONObject("""{"free_seconds": 42, "free_until": 1}""")))
+        val a = paused
         assertFalse(a.pro)
         assertFalse(a.admobVerified)
         assertTrue(a.payments)
@@ -40,12 +54,28 @@ class AccountTest {
     @Test
     fun connectPlaysAnAdOnlyWhenFreeTimeIsUsedUpAndAdsAreLeft() {
         val now = 1_000_000L
-        assertFalse(AccountInfo.fromMe(me(freeUntil = now + 60), now).adBeforeConnect(now))      // time left
-        assertTrue(AccountInfo.fromMe(me(freeUntil = now - 1), now).adBeforeConnect(now))        // used up
-        assertFalse(AccountInfo.fromMe(me(plan = "premium", freeUntil = 0), now).adBeforeConnect(now))  // Pro
-        val noneLeft = AccountInfo.fromMe(me(freeUntil = 0), now).copy(rewardsLeft = 0)
+        assertFalse(AccountInfo.fromMe(me(freeSeconds = 60), now).adBeforeConnect(now))           // time left
+        assertTrue(AccountInfo.fromMe(me(freeSeconds = 0), now).adBeforeConnect(now))            // used up
+        assertFalse(AccountInfo.fromMe(me(plan = "premium", freeSeconds = 0), now).adBeforeConnect(now))  // Pro
+        val noneLeft = AccountInfo.fromMe(me(freeSeconds = 0), now).copy(rewardsLeft = 0)
         assertFalse(noneLeft.adBeforeConnect(now))                                                // today's ads used
-        assertFalse(AccountInfo.fromMe(me(freeUntil = 0), now).copy(admob = false).adBeforeConnect(now))  // no ads
+        assertFalse(AccountInfo.fromMe(me(freeSeconds = 0), now).copy(admob = false).adBeforeConnect(now))  // no ads
+    }
+
+    @Test
+    fun connectAndDisconnectAdsFollowTheAdminSetting() {
+        val connectOnly = AccountInfo.fromMe(me(), 0)
+        assertTrue(connectOnly.toggleAd(connect = true))
+        assertFalse(connectOnly.toggleAd(connect = false))
+        val both = AccountInfo.fromMe(me(toggleAds = "both", gap = 120), 0)
+        assertTrue(both.toggleAd(connect = true) && both.toggleAd(connect = false))
+        assertEquals(120, both.toggleAdGap)
+        val off = AccountInfo.fromMe(me(toggleAds = "off"), 0)
+        assertFalse(off.toggleAd(connect = true) || off.toggleAd(connect = false))
+        assertFalse(AccountInfo.fromMe(me(plan = "premium", toggleAds = "both"), 0).toggleAd(connect = true))  // Pro
+        assertFalse(both.copy(admob = false).toggleAd(connect = false))                         // ads switched off
+        assertEquals("connect", AccountInfo.fromMe(me(toggleAds = "always"), 0).toggleAds)      // unknown -> default
+        assertEquals(3600, AccountInfo.fromMe(me(gap = 99_999), 0).toggleAdGap)
     }
 
     @Test
@@ -96,7 +126,7 @@ class AccountTest {
     fun proHasNoStopTimeAndShowsTheAccount() {
         val a = AccountInfo.fromMe(me(plan = "premium", account = true), 1_000_000)
         assertTrue(a.pro)
-        assertEquals(0L, a.stopAtMs())
+        assertEquals(0L, a.stopAtMs(123_000))
         assertTrue(a.signedIn)
         assertEquals("sam@example.com", a.email)
         assertEquals(1_900_000L, a.proUntil)

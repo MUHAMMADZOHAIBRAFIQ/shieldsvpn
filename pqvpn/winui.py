@@ -310,6 +310,8 @@ class TrayApp:
             return None
         if me.get("plan") == "premium":
             return None
+        if "free_seconds" in me:  # a balance, used up only while connected: all of it is left at connect time
+            return me["free_seconds"]
         return me.get("free_until", 0) - me.get("now", time.time())
 
     def _connect_free_checked(self) -> None:

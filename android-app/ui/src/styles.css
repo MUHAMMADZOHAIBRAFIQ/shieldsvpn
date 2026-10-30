@@ -324,6 +324,7 @@ main { display: flex; flex-direction: column; gap: 14px; }
   letter-spacing: -0.01em;
 }
 .plan__timer svg { width: 20px; height: 20px; color: var(--faint); }
+.plan__rule { margin: -4px 0 12px; }
 .plan--pro {
   border-color: rgba(250, 204, 21, 0.35);
   background: linear-gradient(135deg, rgba(250, 204, 21, 0.1), rgba(245, 158, 11, 0.03)), var(--card);

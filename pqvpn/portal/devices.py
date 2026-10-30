@@ -7,9 +7,10 @@ Model (docs/SPEC.md "App devices"):
     (``d-`` + 24 base32 characters).  The private key never leaves the device (same model as ``pqvpn genkey``).
     The device authenticates to the app API with a 256-bit bearer token, stored here only as a SHA-256 hash.
   * **Plans.**  A device is *Pro* while it is linked to an enabled account whose effective plan is Premium
-    (plans.effective_plan).  Otherwise it is *Free*, and may connect only while ``free_until`` is in the future.
-    Free time is granted per watched ad and checked by the VPN server on every handshake and every status
-    interval (access.PortalAccess), so a modified app cannot skip the ads.
+    (plans.effective_plan).  Otherwise it is *Free*, and may connect only while its balance ``free_seconds`` is
+    above zero.  Free time is granted per watched ad -- only while the device is disconnected -- and used up only
+    while it is connected: the VPN server charges connected Free devices and checks the balance on every handshake
+    and every status interval (access.PortalAccess), so a modified app cannot skip the ads.
   * **Accounts.**  Signing in on a device links it to the account (at most ``pro_device_limit`` devices per
     account); signing out unlinks it.  Deleting an account turns its devices back into anonymous Free devices.
 
@@ -52,10 +53,18 @@ APP_DEFAULTS = {
     "pro_device_limit": "5",     # devices one account may be signed in on at once
     "device_cleanup_days": "30",  # forget anonymous devices unseen for this long
     "enroll_per_ip_day": "20",   # enrollments per source address per 24 h
+    "toggle_ads": "connect",     # Free devices: interstitial after "connect", after "both" connect and disconnect, "off"
+    "toggle_ad_gap": "0",        # at least this many seconds between two such interstitials (0 = every time)
 }
+TOGGLE_ADS = {"connect": "After connecting", "both": "After connecting and after disconnecting", "off": "Never"}
+# A connected app sends at least a keepalive every 25 s (account_client.py); silence for longer means it is gone.
+ACTIVE_SECONDS = 40
+# Ads for free time are refused only while packets are still arriving, so one can follow right after Disconnect.
+REWARD_IDLE_SECONDS = 12
 # (min, max) for the numeric settings; the admin form and every reader clamp to these.
 LIMITS = {"free_minutes": (1, 24 * 60), "free_daily_rewards": (1, 200), "reward_min_seconds": (5, 300),
-          "pro_device_limit": (1, 50), "device_cleanup_days": (1, 3650), "enroll_per_ip_day": (1, 10000)}
+          "pro_device_limit": (1, 50), "device_cleanup_days": (1, 3650), "enroll_per_ip_day": (1, 10000),
+          "toggle_ad_gap": (0, 3600)}
 
 
 class DeviceError(Exception):
@@ -187,7 +196,7 @@ def decide(store: Store, device: dict, now: float, cert_serial: str | None = Non
         return Decision(False, plan, "certificate superseded (the device enrolled again)", user)
     if user is not None and not user["enabled"]:
         return Decision(False, plan, "account disabled", user)
-    if plan == "free" and device["free_until"] <= now:
+    if plan == "free" and device["free_seconds"] <= 0:
         return Decision(False, plan, "free time used up: watch an ad for more", user)
     return Decision(True, plan, "", user)
 
@@ -210,6 +219,7 @@ def state(store: Store, device: dict, settings: dict, now: int, prices: list[dic
     d = decide(store, device, now)
     user = d.user
     granted = store.rewards_granted_since(device["id"], now - 86400)
+    counting = d.plan == "free" and store.is_connected(device["subject"], now - 30, now - ACTIVE_SECONDS)
     prices = prices or []
     label = next((p["label"] for p in prices if p["period"] == "month"), prices[0]["label"] if prices else "")
     return {
@@ -220,7 +230,9 @@ def state(store: Store, device: dict, settings: dict, now: int, prices: list[dic
         "account": ({"username": user["username"], "email": user["email"] or ""} if user else None),
         "plan": d.plan,
         "pro_until": (user["plan_expires"] if user and d.plan == "premium" else None),
-        "free_until": device["free_until"],
+        "free_seconds": device["free_seconds"],  # balance, used up only while connected
+        "free_counting": counting,               # connected right now, so the balance is going down
+        "free_until": now + device["free_seconds"],  # for app builds before the balance (an end time on the clock)
         "can_connect": d.allowed,
         "reason": d.reason,
         "free_minutes": number(settings, "free_minutes"),
@@ -232,6 +244,8 @@ def state(store: Store, device: dict, settings: dict, now: int, prices: list[dic
             "web_ads": enabled(settings, "web_ads_enabled"),
             "payments": payments,
             "play": bool(play_product),
+            "toggle_ads": toggle_ads(settings),
+            "toggle_ad_gap": number(settings, "toggle_ad_gap"),
         },
         "prices": prices,
         "price_label": label,
@@ -264,6 +278,9 @@ def start_reward(store: Store, device: dict, kind: str, settings: dict, now: int
         raise DeviceError(404, "disabled", "ads are not available")
     if decide(store, device, now).plan == "premium":
         raise DeviceError(409, "pro", "Pro accounts do not need ads")
+    if store.is_connected(device["subject"], now - 30, now - REWARD_IDLE_SECONDS):
+        raise DeviceError(409, "connected", "disconnect first: free time is added while the VPN is off, and it is "
+                          "only used while you are connected")
     if store.rewards_granted_since(device["id"], now - 86400) >= number(settings, "free_daily_rewards"):
         raise DeviceError(429, "daily_limit", "you reached today's limit of free sessions; try again tomorrow")
     nonce = secrets.token_urlsafe(24)
@@ -272,11 +289,18 @@ def start_reward(store: Store, device: dict, kind: str, settings: dict, now: int
 
 
 def grant(store: Store, reward: dict, settings: dict, now: int, provider_ref: str | None = None) -> int | None:
-    """Credit one watched ad (single use).  Returns the device's new free_until, or None if nothing was granted."""
+    """Credit one watched ad (single use).  Returns the device's new balance in seconds, or None if nothing was
+    granted."""
     if now - reward["created_at"] > 3600:  # a nonce is good for one hour
         return None
     if store.rewards_granted_since(reward["device_id"], now - 86400) >= number(settings, "free_daily_rewards"):
         return None
     if not store.claim_reward(reward["id"], now, provider_ref):
         return None
-    return store.add_free_time(reward["device_id"], number(settings, "free_minutes") * 60, now)
+    return store.add_free_seconds(reward["device_id"], number(settings, "free_minutes") * 60)
+
+
+def toggle_ads(settings: dict) -> str:
+    """When Free devices show an interstitial: after connecting, after connecting and disconnecting, or never."""
+    value = settings.get("toggle_ads", APP_DEFAULTS["toggle_ads"])
+    return value if value in TOGGLE_ADS else APP_DEFAULTS["toggle_ads"]

@@ -9,12 +9,14 @@ The design is in [SPEC.md §16](SPEC.md#16-app-devices-free-with-ads-sign-in-and
 | | Free | Pro |
 | --- | --- | --- |
 | Sign-up | none: the app sets itself up on first start | email + password, verified by an emailed code |
-| Time | 30 minutes per watched ad (you choose the number), up to 16 ads a day | unlimited |
-| Ads | video ad for time (Android), ad web page (Windows), an ad after connecting (Android) | none |
+| Time | 30 minutes per watched ad (you choose the number), up to 16 ads a day; used only while connected | unlimited |
+| Ads | video ad for time while disconnected (Android), ad web page (Windows), an ad after connecting and, if you choose, after disconnecting (Android) | none |
 | Extras | | ad- and malware-blocking DNS, up to 5 devices |
 | Payment | | card, through Paddle's checkout; you set the price in Paddle |
 
-The VPN server enforces free time itself. An app that skips the ads still cannot connect.
+The VPN server enforces free time itself. An app that skips the ads still cannot connect. Free time is a balance:
+it goes down only while the device is connected (the server counts up to the device's last packet), never while
+the VPN is off, and ads for more time are only for a disconnected VPN.
 
 ## 0. Before you start
 
@@ -139,6 +141,9 @@ The first command registers the PC and creates the Desktop/Start-menu shortcut. 
    connection). A later Connect with time left shows an ad after connecting.
 3. Admin → App devices: the phone is listed as Free with minutes left.
 4. Let the time run out (or set *Free minutes per ad* to 1 for the test) → the app disconnects with a message.
+   Disconnect earlier instead → the clock shows *Paused* and the balance stays the same however long you wait.
+5. Settings → *Ad on connect / disconnect* = *After connecting and after disconnecting* → an ad after each tap.
+   *Watch an ad* is greyed out while connected.
 5. ☰ menu → *Sign up for Pro* → create an account → enter the emailed code → the plan sheet opens.
 6. Go Pro → pay in the sandbox → back in the app the card shows **ShieldsVPN Pro**; Connect works with no ads.
 7. Windows: *Get free time* → wait on the ad page → press its button → the window shows the minutes.
@@ -190,6 +195,16 @@ Verified:
 - 2026-10-31, User Agreement (API 36 emulator): a fresh install shows it before anything else; Decline closes the
   app and it asks again on the next start; after Agree it does not return on later starts, and after uninstall and
   reinstall it is shown again. The ☰ menu's *User agreement* opens it read-only.
+- 2026-10-31, Free time used only while connected (emulator, local portal + real VPN server, 1 minute per ad, ads
+  on connect and disconnect): after the test rewarded ad the balance fell 60 → 56 → 50 → 42 while connected; the
+  tap on Disconnect showed an interstitial and the balance stayed at 42 for 25 s although the server still listed
+  the session; the app showed *Paused* 00:00:42 and *Watch an ad* again; an ad watched while disconnected made it
+  102. The first try had charged time after Disconnect (billing up to "now"); charging now stops at the last
+  packet, with tests for it.
+- 2026-10-31, admin console (headless Chrome against a throwaway portal, real form posts): after sign-in /admin
+  leads with the Website, Browser extension and App cards; the website address saved and *Check the pages
+  now* reached the live https://shieldsvpn.vercel.app pages (four times 200 OK); a store page saved; the App
+  page showed the sample devices; no CSP or script errors.
 
 Not verified:
 

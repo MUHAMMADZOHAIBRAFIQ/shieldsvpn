@@ -164,7 +164,7 @@ SQLite in WAL mode, foreign keys on, busy timeout 5 s. Must live on a local file
 | Table | Purpose | Key columns |
 | --- | --- | --- |
 | `users` | accounts | `username` (unique, NOCASE, = certificate subject; `d-` prefix reserved), `role` (`admin`/`user`), `password_hash` (scrypt), `must_change_password`, `totp_secret`/`totp_enabled`/`totp_last_step`, `enabled`, `vpn_ip` (unique), `active_serial`, `profile_issued_at`, `failed_logins`/`locked_until`, `email` (unique NOCASE when set), `email_verified`, `plan` (`free`/`premium`), `plan_expires` (first second after the last paid day), `custom_dns`, `paddle_customer_id`, `paddle_subscription_id` |
-| `vpn_devices` | devices registered by the apps (§16) | `subject` (`d-` + 24 base32, = certificate subject), `token_hash` (SHA-256 of the bearer token), `user_id` (NULL = anonymous; SET NULL on account delete), `known_user_id`, `platform`, `vpn_ip`, `active_serial`, `cert_expires`, `enabled`, `free_until`, `failed_logins`/`locked_until`, `created_at`, `last_seen`, `enroll_ip` |
+| `vpn_devices` | devices registered by the apps (§16) | `subject` (`d-` + 24 base32, = certificate subject), `token_hash` (SHA-256 of the bearer token), `user_id` (NULL = anonymous; SET NULL on account delete), `known_user_id`, `platform`, `vpn_ip`, `active_serial`, `cert_expires`, `enabled`, `free_seconds` (Free-time balance, used only while connected; `free_until` is the end time it replaced, converted on upgrade), `failed_logins`/`locked_until`, `created_at`, `last_seen`, `enroll_ip` |
 | `reward_grants` | one row per ad view | `device_id`, `kind` (`admob`/`web`), `nonce_hash`, `started_at`, `granted_at` (single use), `provider_ref` (unique: AdMob transaction id) |
 | `pay_links` | one-time links to Paddle's checkout | `code_hash`, `user_id`, `txn_id`, `expires_at` (30 min), `completed_at` |
 | `payments` | payments seen at Paddle | `provider_ref` (unique transaction id), `user_id`, `status`, `amount`, `currency` |
@@ -197,7 +197,11 @@ and a same-origin `Origin`; every request requires an allowed `Host`.
 | POST | `/profile` | user | issue and download own profile ZIP |
 | GET | `/api/status` | user | JSON: `now`, `server_online`, `me`; admins also get `peers` |
 | GET/POST | `/account`, `/account/password`, `/account/email`, `/account/2fa`, `/account/2fa/disable` | user | self-service |
-| GET | `/admin` | admin | dashboard, add-user form, user table, live peers, recent audit |
+| GET | `/admin` | admin | dashboard: the three product cards (Website, Browser extension, App) first, then VPN server tiles, add-user form, user table, live peers, recent audit |
+| GET, POST | `/admin/website` | admin | website details: public address (`website_url`), legal pages, account portal, web accounts, Paddle and web ads; POST saves the address |
+| POST | `/admin/website/check` | admin | HEAD the legal pages (HTTPS, public addresses only, no redirects; `products.check_pages`) |
+| GET, POST | `/admin/extension` | admin | browser extension: package (`browser-extension/manifest.json`), store pages (`extension_*_url`, store hosts only), Windows PCs |
+| GET | `/admin/app` | admin | app devices per platform, online now, Pro, free time and ads, Play / Paddle status, newest devices |
 | POST | `/admin/users` | admin | create user (temporary password shown once) |
 | GET | `/admin/users/{id}` | admin | user page |
 | POST | `/admin/users/{id}/{action}` | admin | `edit`, `disable`, `enable`, `unlock`, `signout`, `reset-password`, `reset-2fa`, `profile`, `delete` (not on self for disable/delete) |
@@ -227,7 +231,8 @@ until they comply.
 | `smtp_password` | | sealed `enc:v1:` with AES-256-GCM under `portal-secrets.key` |
 | `firebase_*` | | mirror state; the key itself is `firebase-key.json` (0600) |
 | `app_enrollment`, `app_accounts` | `0`, `0` | apps may register themselves (Free); apps may sign in / sign up / reset passwords |
-| `free_minutes`, `free_daily_rewards` | `30`, `16` | free time per watched ad; ads that grant time per device per 24 h |
+| `free_minutes`, `free_daily_rewards` | `30`, `16` | free time per watched ad (a balance used only while connected); ads that grant time per device per 24 h |
+| `toggle_ads`, `toggle_ad_gap` | `connect`, `0` | Free devices' interstitial after `connect`, after `both` connect and disconnect, or `off`; minimum seconds between two |
 | `admob_enabled`, `admob_require_ssv` | `0`, `1` | Android rewarded ads; `0` = test mode (trust the app's report) |
 | `web_ads_enabled`, `web_ads_test`, `reward_min_seconds` | `0`, `0`, `20` | Windows ad page; labelled placeholder ad; minimum viewing time |
 | `pro_device_limit`, `device_cleanup_days`, `enroll_per_ip_day` | `5`, `30`, `20` | devices per account; forget unused anonymous devices; registrations per IP per day |
@@ -526,10 +531,24 @@ linked account's effective plan, else Free.
 ### 16.2 VPN access for app devices
 
 `PortalAccess.authorize` for a `d-…` subject: the device exists, is enabled, `active_serial` equals the certificate
-serial, a linked account (if any) is enabled, and a Free device has `free_until` in the future. DNS comes from the
+serial, a linked account (if any) is enabled, and a Free device has `free_seconds` above zero. DNS comes from the
 account's rules, or the Free plan's for anonymous devices. `sync()` drops sessions that stop meeting these rules.
-Deleting an account turns its devices into anonymous devices with no time left. The apps also stop the tunnel at
-`free_until` themselves (Android service timer, Windows window/tray), with a message, so users see why.
+
+**Free time is a balance used only while connected.** Every status interval `sync()` charges each connected Free
+device for the seconds up to the **last packet** it sent (`peer.last_rx`; apps send a keepalive every 25 s). A client
+that disconnects sends nothing more while its session lingers on the server until it expires, so time after the tap
+on Disconnect is never charged; a silence longer than 40 s (`GAP`) is treated as disconnected and not charged
+either (also when the same session comes back). At zero the session is dropped. Ads for time are refused (`409
+connected`) while the device's packets still arrive (last packet within 12 s); `/me` reports `free_seconds`,
+`free_counting` (packets within 40 s) and, for older app builds, `free_until` = now + balance. The peers table
+publishes `last_rx`, so "connected now" on the admin pages means recent packets. Deleting an account turns its
+devices into anonymous devices with no time left. The apps also stop the tunnel when the balance runs out
+(Android service timer, Windows window/tray), with a message, so users see why.
+
+**Ads on connect / disconnect (Android, Free).** `toggle_ads` = `connect` (default: an interstitial after
+connecting), `both` (also after the user disconnects) or `off`; `toggle_ad_gap` = minimum seconds between two of
+them (0 = every time). The ad's length is decided by the ad network (an AdMob interstitial unit limited to *Display*
+ads shows short image ads); Google's policy forbids ads after every user action, so a gap is safer.
 
 ### 16.3 App API (`/api/v1/`, JSON, `Authorization: Bearer <device token>`)
 

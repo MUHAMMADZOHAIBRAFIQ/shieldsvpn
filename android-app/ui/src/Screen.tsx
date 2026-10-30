@@ -154,7 +154,8 @@ export function Screen(props: ScreenProps) {
         )}
 
         {profile && account.available && (
-          <PlanCard account={account} now={now} onWatchAd={props.onWatchAd ?? noop} onGoPro={props.onGoPro ?? noop}
+          <PlanCard account={account} now={now} runningSince={state.phase === 'connected' ? state.connectedSince : 0}
+            connected={state.active} onWatchAd={props.onWatchAd ?? noop} onGoPro={props.onGoPro ?? noop}
             onChoosePlan={props.onChoosePlan} onSignIn={props.onSignIn ?? noop} onSignOut={props.onSignOut ?? noop} onManage={props.onManage ?? noop}
             onDeleteAccount={props.onDeleteAccount} />
         )}

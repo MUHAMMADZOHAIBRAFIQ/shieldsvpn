@@ -270,12 +270,13 @@ class TestAppApi(unittest.IsolatedAsyncioTestCase):
         st, me = app.call("POST", "/api/v1/reward/claim", {"nonce": nonce})
         self.assertEqual(st, 200, me)
         self.assertTrue(me["can_connect"])
-        self.assertAlmostEqual(me["free_until"], before + 1800, delta=5)
+        self.assertEqual((me["free_seconds"], me["free_counting"]), (1800, False))  # a balance, not running
+        self.assertAlmostEqual(me["free_until"], before + 1800, delta=5)  # what older app builds read
         st, _ = app.call("POST", "/api/v1/reward/claim", {"nonce": nonce})
         self.assertEqual(st, 409)  # single use
         _, data = app.call("POST", "/api/v1/reward/start", {"kind": "admob"})
         st, me = app.call("POST", "/api/v1/reward/claim", {"nonce": data["nonce"]})
-        self.assertAlmostEqual(me["free_until"], before + 3600, delta=5)  # time adds up
+        self.assertEqual(me["free_seconds"], 3600)  # time adds up
         self.assertEqual(me["rewards_left_today"], 0)
         st, data = app.call("POST", "/api/v1/reward/start", {"kind": "admob"})
         self.assertEqual((st, data["error"]), (429, "daily_limit"))
@@ -421,7 +422,7 @@ class TestAppApi(unittest.IsolatedAsyncioTestCase):
         device = self.portal.store.vpn_device_by_subject(app.profile["subject"])
         st, _, _ = admin.post(f"/admin/devices/{device['id']}/disable", {"csrf": admin.csrf(page)})
         self.assertEqual(st, 200)
-        self.portal.store.add_free_time(device["id"], 600, int(time.time()))
+        self.portal.store.add_free_seconds(device["id"], 600)
         me = app.me()
         self.assertEqual((me["can_connect"], me["reason"]), (False, "device disabled by an administrator"))
         _, _, page = admin.get("/admin")
@@ -439,7 +440,7 @@ class TestAppApi(unittest.IsolatedAsyncioTestCase):
         app = App(self.port)
         await asyncio.to_thread(app.enroll)
         store = self.portal.store
-        store.add_free_time(store.vpn_device_by_subject(app.profile["subject"])["id"], 600, int(time.time()))
+        store.add_free_seconds(store.vpn_device_by_subject(app.profile["subject"])["id"], 600)
         ident = pki.Identity(pki.Certificate.from_pem(app.profile["certificate"]), app.key)
         trust = pki.TrustStore.load([self.portal.cfg.ca_certificate], peer_algs=DEFAULT_PEER_SIG_ALGS,
                                     ca_algs=DEFAULT_CA_SIG_ALGS + ("SLH-DSA-SHA2-128s",))
@@ -503,13 +504,13 @@ class TestAppApi(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(asyncio.TimeoutError):
                 await asyncio.wait_for(client.connected.wait(), 1.5)
 
-            store.add_free_time(device["id"], 60, int(time.time()))  # one watched ad later ...
+            store.add_free_seconds(device["id"], 60)  # one watched ad later ...
             client.start_handshake(time.monotonic())
             await asyncio.wait_for(client.connected.wait(), 10)
             c_tun.inject(icmp_echo(app.profile["address"], "10.98.0.1", 1))
             await asyncio.wait_for(s_tun.written.get(), 5)
 
-            store.update_vpn_device(device["id"], free_until=int(time.time()) - 1)  # ... and the time runs out
+            store.update_vpn_device(device["id"], free_seconds=0)  # ... and the time runs out
             for _ in range(20):
                 await asyncio.sleep(0.25)
                 if subject not in server.peers:

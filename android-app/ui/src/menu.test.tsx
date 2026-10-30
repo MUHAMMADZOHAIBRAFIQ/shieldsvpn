@@ -73,6 +73,11 @@ describe('Menu', () => {
     expect(html).not.toContain('Import a profile file') // Play build
     expect(html).not.toContain('Privacy policy')
     expect(menu({ ...free, accounts: false })).not.toContain('Sign in') // app sign-in switched off
+    const on = renderToStaticMarkup(
+      <Menu account={free} hasProfile imports={false} locked connected onClose={noop} onPro={noop} onWatchAd={noop}
+        onSignIn={noop} onSignOut={noop} onDeleteAccount={noop} onImport={noop} onVpnSettings={noop} onPrivacy={noop} />)
+    expect(on).toContain('Disconnect first') // free time from ads only while the VPN is off
+    expect(on).toMatch(/<button[^>]*disabled=""[^>]*><span class="menu__icon">[\s\S]*?Get 30 free minutes/)
   })
 
   it('escapes what the portal sends', () => {

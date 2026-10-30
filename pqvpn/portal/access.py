@@ -6,8 +6,11 @@ A client must present a certificate from the trusted CA *and* be allowed by the 
     currently active profile must have that certificate's serial.  Disabling an account (or downloading a new
     profile) therefore cuts off the old credentials within one status interval -- no CRL distribution.
   * Devices enrolled by the apps (subject ``d-...``, devices.py): the device must be enabled with that serial, a
-    linked account must be enabled, and a Free device must have unused free time (earned by watching ads).  Free
-    time is enforced here, by the server, so a modified app cannot skip the ads.
+    linked account must be enabled, and a Free device must have Free time left (earned by watching ads).  Free
+    time is used up here, by the server, only while the device is connected: ``sync`` charges a Free device up
+    to the last packet it sent (apps send a keepalive at least every 25 s).  A disconnecting client sends nothing,
+    and its session lingers on the server until it expires, so billing up to "now" would charge time after the
+    tap on Disconnect; a silence longer than a keepalive is never charged.  A modified app cannot skip the ads.
 
 Accepted peers also get per-account tunnel settings pushed in the handshake (today: the DNS servers of their
 plan, see plans.py).
@@ -33,6 +36,7 @@ class PortalAccess:
     INTERVAL = 2.0
     TOUCH_INTERVAL = 60.0      # how often connected devices' last_seen is written
     CLEANUP_INTERVAL = 3600.0  # how often anonymous devices unseen for a long time are forgotten
+    GAP = 40.0                 # silence longer than this (> keepalive) = it was disconnected: never charged
 
     def __init__(self, database: str, url: str = ""):
         self.store = Store(database)
@@ -40,6 +44,8 @@ class PortalAccess:
         self._last = 0.0
         self._touched = 0.0
         self._cleaned = 0.0
+        # Free devices being charged: subject -> (monotonic time charged up to, unbilled fraction of a second)
+        self._meter: dict[str, tuple[float, float]] = {}
 
     def _settings(self) -> dict:
         return self.store.settings({**plans.DEFAULT_SETTINGS, **devices.APP_DEFAULTS})
@@ -75,23 +81,49 @@ class PortalAccess:
         return {"dns": dns} if dns else {}
 
     def _still_allowed(self, name: str, serial: str, now: float) -> bool:
-        if devices.is_device_subject(name):
-            device = self.store.vpn_device_by_subject(name)
-            return device is not None and devices.decide(self.store, device, now, serial).allowed
+        """An administrator-issued profile: the account is enabled and this is its current certificate."""
         user = self.store.user_by_name(name)
         return user is not None and bool(user["enabled"]) and (user["active_serial"] or "") == serial
 
+    def _charge(self, name: str, last_rx: float) -> int:
+        """Whole seconds a Free device used since its last charge, counted up to its last packet (monotonic)."""
+        last, carry = self._meter.get(name, (last_rx, 0.0))
+        if last_rx - last > self.GAP:  # it was gone (disconnected, or the network dropped): not charged
+            last, carry = last_rx, 0.0
+        used = max(0.0, last_rx - last) + carry
+        whole = int(used)
+        self._meter[name] = (max(last, last_rx), used - whole)
+        return whole
+
+    def _device_ok(self, name: str, serial: str, last_rx: float, wall: float, charges: list) -> bool:
+        """Still allowed after charging this interval's Free time; Pro devices are never charged."""
+        device = self.store.vpn_device_by_subject(name)
+        decision = devices.decide(self.store, device, wall, serial) if device else None
+        if decision is None or not decision.allowed:
+            return False
+        if decision.plan != "free":
+            self._meter.pop(name, None)  # a device that turns Free again starts a fresh meter
+            return True
+        used = self._charge(name, last_rx)
+        if used:
+            charges.append((name, used))
+        return device["free_seconds"] - used > 0
+
     def sync(self, peers: dict, now: float) -> list[str]:
-        """Publish live peers; return names of peers that must be disconnected."""
+        """Publish live peers, charge connected Free devices; return names of peers that must be disconnected."""
         if now - self._last < self.INTERVAL:
             return []
         self._last = now
-        rows, kick = [], []
+        rows, kick, charges = [], [], []
         wall = time.time()
         try:
             for name, p in peers.items():
-                if not self._still_allowed(name, p.cert.serial_hex, wall):
+                last_rx = min(p.last_rx or now, now)
+                ok = (self._device_ok(name, p.cert.serial_hex, last_rx, wall, charges)
+                      if devices.is_device_subject(name) else self._still_allowed(name, p.cert.serial_hex, wall))
+                if not ok:
                     kick.append(name)
+                    self._meter.pop(name, None)
                     continue
                 cur = p.current or p.next
                 rows.append({
@@ -100,7 +132,11 @@ class PortalAccess:
                     "key_alg": p.cert.key_alg.name,
                     "connected_since": int(p.connected_wall),
                     "last_handshake": int(wall - (now - cur.created)) if cur else None,
-                    "rx_bytes": p.rx_bytes, "tx_bytes": p.tx_bytes})
+                    "rx_bytes": p.rx_bytes, "tx_bytes": p.tx_bytes,
+                    "last_rx": int(wall - (now - p.last_rx)) if p.last_rx else None})
+            self.store.charge_free_seconds(charges)
+            for gone in set(self._meter) - set(peers):  # disconnected: their time stops here
+                del self._meter[gone]
             self.store.publish_peers(rows)
             if now - self._touched >= self.TOUCH_INTERVAL:
                 self._touched = now

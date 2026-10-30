@@ -116,7 +116,9 @@ describe('Screen', () => {
   it('shows the Free plan with a countdown, an ad button and Go Pro', () => {
     const html = render({ profile: { ...profile, enrolled: true } }, traffic, false, free)
     expect(html).toContain('Free plan')
-    expect(html).toContain('00:30:00') // 1810 s measured 10 s ago
+    expect(html).toContain('00:30:10') // disconnected: the balance does not go down
+    expect(html).toContain('Paused')
+    expect(html).toContain('used only while you are connected')
     expect(html).toContain('Watch an ad · +30 min')
     expect(html).toContain('Go Pro · PKR 500 / month')
     expect(html).toContain('Sign in')
@@ -212,9 +214,21 @@ describe('Screen', () => {
     expect(render({ profile, phase: 'connected', active: true }, traffic, false, empty)).not.toContain('Short ad')
   })
 
-  it('counts free time down from when it was measured', () => {
-    expect(freeLeft({ ...free, at: 1000, freeSecondsLeft: 60 }, 31_000)).toBe(30)
-    expect(freeLeft({ ...free, at: 1000, freeSecondsLeft: 60 }, 500_000)).toBe(0)
-    expect(freeLeft({ ...free, at: 5000, freeSecondsLeft: 60 }, 1000)).toBe(60) // clock went back: never adds time
+  it('counts free time down only while connected, from the later of measurement and connection', () => {
+    const a = { ...free, at: 1000, freeSecondsLeft: 60 }
+    expect(freeLeft(a, 500_000)).toBe(60) // disconnected: never goes down
+    expect(freeLeft(a, 31_000, 500)).toBe(30) // connected before the measurement: from the measurement
+    expect(freeLeft(a, 31_000, 21_000)).toBe(50) // connected after it: only the 10 s since connecting
+    expect(freeLeft(a, 900_000, 500)).toBe(0)
+    expect(freeLeft({ ...a, at: 5000 }, 1000, 500)).toBe(60) // clock went back: never adds time
+  })
+
+  it('runs the clock while connected and asks to disconnect before an ad', () => {
+    const html = render({ profile: { ...profile, enrolled: true }, phase: 'connected', active: true,
+      connectedSince: NOW - 5000 }, traffic, false, free)
+    expect(html).toContain('00:30:05') // 1810 s, 5 s of it used since connecting
+    expect(html).toContain('Running')
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Watch an ad/)
+    expect(html).toContain('Disconnect to watch an ad and add free time.')
   })
 })

@@ -42,7 +42,7 @@ from .. import __version__, account_client, logo
 from ..config import PortalConfig
 from ..crypto.suites import describe_suite
 from ..protocol import RateLimiter
-from . import accounts, api, auth, devices, firebase, google, mail, payments, plans, play, rewards
+from . import accounts, api, auth, devices, firebase, google, mail, payments, plans, play, products, rewards
 from .accounts import (LOCK_SECONDS, MAX_FAILURES, REDACTED_ACTOR, RESET_MAX_ATTEMPTS, RESET_TTL,  # noqa: F401
                        SIGNUP_TTL, USERNAME_RE, mask_email)
 from .qr import QrCode
@@ -125,6 +125,7 @@ class Portal:
         self.servers: list[http.server.ThreadingHTTPServer] = []
         self.mailer = mail.send  # (transport, message, timeout, allow_internal) -> info; tests swap in a fake
         self.admob = rewards.AdMobVerifier()  # tests swap in one that serves their own key
+        self.check_pages = products.check_pages  # the admin's website check; tests swap in a fake
         self.payments = payments.Payments(self.store, self.settings)
         self.play = play.PlayBilling(self.store, self.settings, os.path.join(data_dir, play.KEY_FILE),
                                      self.vault.subkey("play-account"))
@@ -162,7 +163,8 @@ class Portal:
 
     def settings(self) -> dict:
         s = self.store.settings({**mail.DEFAULT_SETTINGS, **plans.DEFAULT_SETTINGS, **PORTAL_DEFAULTS,
-                                 **devices.APP_DEFAULTS, **payments.DEFAULT_SETTINGS, **play.DEFAULT_SETTINGS})
+                                 **devices.APP_DEFAULTS, **payments.DEFAULT_SETTINGS, **play.DEFAULT_SETTINGS,
+                                 **products.DEFAULT_SETTINGS})
         for k in SECRET_SETTINGS:
             if s.get(k):
                 try:
@@ -1258,8 +1260,10 @@ def page_admin_dashboard(h: Handler, notice: str = "", error: str = "") -> None:
     issued = (f"Profile issued {e(fmt_time(me['profile_issued_at']))}." if me["profile_issued_at"]
               else "You have not downloaded a profile yet.")
     h._html("Admin dashboard", f"""<h1 class="page">Admin dashboard</h1>
-<p class="muted lead">Signed in as <strong>{e(me['username'])}</strong>. Manage users, plans &amp; DNS, email,
-portal access and the audit log from here.</p>{_notices(notice, error)}
+<p class="muted lead">Signed in as <strong>{e(me['username'])}</strong>. Your three products are below; users,
+plans &amp; DNS, email, portal access and the audit log follow.</p>{_notices(notice, error)}
+{_products_hub(h, settings, int(time.time()))}
+<h2 class="section-title">VPN server &amp; users</h2>
 <div class="tiles" data-live>
 <a class="tile" href="#connected"><span class="tile-label">VPN server</span>
 <span id="server-pill" class="pill off">Checking&hellip;</span></a>
@@ -1597,6 +1601,7 @@ _APP_NUMBERS = (
     ("reward_min_seconds", "Web ad: minimum seconds on the page"), ("pro_device_limit", "Devices per account"),
     ("device_cleanup_days", "Forget unused anonymous devices after (days)"),
     ("enroll_per_ip_day", "New devices per network per day"),
+    ("toggle_ad_gap", "Seconds between connect/disconnect ads (0 = every time)"),
 )
 
 
@@ -1613,6 +1618,9 @@ def _apps_card(h: Handler, settings: dict) -> str:
     numbers = "".join(
         f'<label>{label}<input name="{k}" type="number" min="{devices.LIMITS[k][0]}" max="{devices.LIMITS[k][1]}" '
         f'required value="{devices.number(settings, k)}"></label>' for k, label in _APP_NUMBERS)
+    mode = devices.toggle_ads(settings)
+    toggle = "".join(f'<option value="{k}"{" selected" if k == mode else ""}>{e(label)}</option>'
+                     for k, label in devices.TOGGLE_ADS.items())
     counts = h.portal.store.device_counts()
     used = len([u for u in h.portal.store.users() if u["vpn_ip"]]) + counts["total"]
     base = (h.portal.cfg.public_url or "https://<your portal address>/").rstrip("/") + "/"
@@ -1621,7 +1629,13 @@ def _apps_card(h: Handler, settings: dict) -> str:
 Tunnel addresses used: {used} of {_address_capacity(h.portal.cfg)} in <code>{e(h.portal.cfg.subnet)}</code>.
 Everything here is off until you turn it on. <a href="/admin/devices">See devices &rarr;</a></p>
 <form method="post" action="/admin/settings/apps">{_csrf_field(h)}{switches}
-<div class="form-grid">{numbers}</div><button class="btn primary">Save app settings</button></form>
+<div class="form-grid"><label>Ad on connect / disconnect (Free, Android)<select name="toggle_ads">{toggle}</select>
+</label>{numbers}</div>
+<p class="muted small">Free time is a balance: watching an ad adds to it while the VPN is off, and it is used up only
+while the device is connected. The ad's length is set by Google, not here: in the AdMob console, an interstitial ad
+unit limited to <em>Display</em> ads shows short image ads instead of videos. Google's policy does not allow ads after
+every user action, so a gap of a few minutes is safer for your AdMob account.</p>
+<button class="btn primary">Save app settings</button></form>
 <p class="muted small">AdMob server-side verification URL (paste it in the AdMob console for your rewarded ad unit):
 <code>{e(base)}api/v1/admob/ssv</code>. Google can only call it once the portal has a public HTTPS address with
 a trusted certificate.</p></section>"""
@@ -1629,10 +1643,16 @@ a trusted certificate.</p></section>"""
 
 def do_admin_settings_apps(h: Handler) -> None:
     values = {k: "1" if h.form.get(k) else "0" for k, _t, _d in _APP_SWITCHES}
+    current = h.portal.settings()
+    # Fields added later (connect/disconnect ads) keep their value when an older form does not send them.
+    values["toggle_ads"] = h.form.get("toggle_ads", devices.toggle_ads(current))
+    if values["toggle_ads"] not in devices.TOGGLE_ADS:
+        return page_admin_settings(h, error="Choose when the connect/disconnect ad is shown.")
     for k, label in _APP_NUMBERS:
         lo, hi = devices.LIMITS[k]
+        default = str(devices.number(current, k)) if k == "toggle_ad_gap" else ""
         try:
-            n = int(h.form.get(k, ""))
+            n = int(h.form.get(k, default))
         except ValueError:
             return page_admin_settings(h, error=f"{label}: enter a whole number.")
         if not lo <= n <= hi:
@@ -1808,7 +1828,7 @@ def _device_plan(d: dict, users: dict, now: int) -> str:
     user = users.get(d["user_id"])
     if user and plans.effective_plan(user, now) == "premium":
         return '<span class="badge premium">Pro</span>'
-    left = d["free_until"] - now
+    left = d["free_seconds"]
     return ('<span class="badge free">Free</span> ' +
             (f'<span class="small">{left // 60} min left</span>' if left > 0 else '<span class="muted small">no time</span>'))
 
@@ -1868,6 +1888,282 @@ def do_admin_device_action(h: Handler, device_id: str, action: str) -> None:
         h._audit("device_deleted", f"device={name}")
         return page_admin_devices(h, f"{e(name)} deleted; its VPN access ends within seconds.")
     h._error(404, "Unknown action.")
+
+
+# ---------------------------------------------------------------------- the three products (products.py)
+
+_ICON = {
+    "web": '<path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
+    "ext": '<path d="M10 3h4v3a2 2 0 1 0 4 0V3h3v7h-3a2 2 0 1 0 0 4h3v7h-7v-3a2 2 0 1 0-4 0v3H3v-7h3a2 2 0 1 0 '
+           '0-4H3V3h7z"/>',
+    "app": '<rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 18.5h3"/>',
+}
+
+
+def _icon(name: str) -> str:
+    return (f'<svg class="product__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" '
+            f'stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">{_ICON[name]}</svg>')
+
+
+def _on_off(flag: bool, on: str = "On", off: str = "Off") -> str:
+    return f'<span class="pill on">{on}</span>' if flag else f'<span class="pill off">{off}</span>'
+
+
+def _ext_link(url: str) -> str:
+    """An outside page, opened in a new tab without handing it this page (noopener, no Referer)."""
+    return f'<a href="{e(url)}" target="_blank" rel="noopener noreferrer">{e(url)}</a>'
+
+
+def _web_stats(h: Handler, now: int) -> dict:
+    users = h.portal.store.users()
+    return {"users": len(users), "admins": sum(u["role"] == "admin" for u in users),
+            "with_email": sum(bool(u["email"]) for u in users),
+            "unverified": sum(bool(u["email"]) and not u["email_verified"] for u in users),
+            "new_week": sum(u["created_at"] >= now - 7 * 86400 for u in users),
+            "premium": sum(plans.effective_plan(u, now) == "premium" for u in users),
+            "paddle": sum(bool(u["paddle_subscription_id"]) for u in users)}
+
+
+def _products_hub(h: Handler, settings: dict, now: int) -> str:
+    """Three cards at the top of the admin console: Website, Browser extension, App."""
+    store = h.portal.store
+    web = _web_stats(h, now)
+    dev = store.device_stats(now)
+    online = store.online_device_counts(now - 60, now - devices.ACTIVE_SECONDS)
+    android, windows = dev.get("android", {}), dev.get("windows", {})
+    site = settings.get("website_url", "")
+    host = urllib.parse.urlsplit(site).hostname if site else ""
+    ext = products.extension_info()
+    stores = sum(bool(settings.get(k)) for k in products.STORES)
+    signup = "sign-up on" if h.portal.signup_enabled() else "sign-up off"
+    return f"""<section class="products" aria-label="Products">
+<a class="product product--web" href="/admin/website">{_icon("web")}
+<span class="product__name">Website</span><span class="product__sub">{e(host or "Address not set yet")}</span>
+<span class="product__facts"><span><b>{web['users']}</b> accounts</span><span><b>{web['premium']}</b> Pro</span>
+<span>{signup}</span></span><span class="product__go">Open details &rarr;</span></a>
+<a class="product product--ext" href="/admin/extension">{_icon("ext")}
+<span class="product__name">Browser extension</span>
+<span class="product__sub">{e(f"Version {ext['version']}" if ext else "Package not on this server")}</span>
+<span class="product__facts"><span><b>{stores}</b>/3 stores</span><span><b>{windows.get('total', 0)}</b> Windows PCs</span>
+</span><span class="product__go">Open details &rarr;</span></a>
+<a class="product product--app" href="/admin/app">{_icon("app")}
+<span class="product__name">App</span><span class="product__sub">Android &amp; Windows</span>
+<span class="product__facts"><span><b>{android.get('total', 0)}</b> phones</span>
+<span><b>{sum(online.values())}</b> online</span><span><b>{android.get('new_week', 0) + windows.get('new_week', 0)}</b> new this week</span>
+</span><span class="product__go">Open details &rarr;</span></a>
+</section>"""
+
+
+def _back() -> str:
+    return '<p class="crumbs"><a href="/admin">&larr; Admin dashboard</a></p>'
+
+
+def page_admin_website(h: Handler, notice: str = "", error: str = "", checks: list[dict] | None = None) -> None:
+    s, cfg, now = h.portal.settings(), h.portal.cfg, int(time.time())
+    web = _web_stats(h, now)
+    site = s.get("website_url", "")
+    by_url = {c["url"]: c for c in checks or []}
+    rows = []
+    for name, path in products.WEBSITE_PAGES:
+        url = products.page_url(site, path) if site else ""
+        c = by_url.get(url)
+        if not url:
+            status = '<span class="muted small">set the address first</span>'
+        elif c is None:
+            status = '<span class="muted small">not checked</span>'
+        elif c["ok"]:
+            status = f'<span class="pill on">{c["status"]} OK</span> <span class="muted small">{c["ms"]} ms</span>'
+        else:
+            status = (f'<span class="pill bad">{c["status"] or "no answer"}</span> '
+                      f'<span class="muted small">{e(c["error"])}</span>')
+        rows.append(f'<tr><td>{e(name)}</td><td class="small">{_ext_link(url) if url else "&ndash;"}</td>'
+                    f'<td>{status}</td></tr>')
+    offers = payments.offers(s)
+    prices = ", ".join(o["label"] for o in offers) or "none on sale"
+    mail_ready = bool(mail.is_configured(s) and mail.node_binary() and mail.nodemailer_installed())
+    check_btn = (f'<form method="post" action="/admin/website/check" class="inline">{_csrf_field(h)}'
+                 f'<button class="btn">Check the pages now</button></form>') if site else ""
+    h._html("Website", f"""{_back()}<div class="product-head">{_icon("web")}<div><h1>Website</h1>
+<p class="muted">The public website, its legal pages, and the account portal people sign in to.</p></div></div>
+{_notices(notice, error)}
+<div class="tiles"><div class="tile"><span class="tile-label">Accounts</span><strong class="tile-num">{web['users']}</strong>
+<span class="muted small">{web['admins']} administrator(s)</span></div>
+<div class="tile"><span class="tile-label">New this week</span><strong class="tile-num">{web['new_week']}</strong></div>
+<div class="tile"><span class="tile-label">Pro accounts</span><strong class="tile-num">{web['premium']}</strong>
+<span class="muted small">{web['paddle']} paying through Paddle</span></div>
+<div class="tile"><span class="tile-label">Email not verified</span><strong class="tile-num">{web['unverified']}</strong>
+<span class="muted small">of {web['with_email']} with an email</span></div></div>
+<section class="card"><div class="card-head"><h2>Public website</h2>{check_btn}</div>
+<p class="muted small">Address: {_ext_link(site) if site else "not set"}. The legal pages are required by Google Play;
+checking them asks each page for its status only (HTTPS, public addresses, no redirects followed).</p>
+<div class="table-wrap"><table><thead><tr><th>Page</th><th>Address</th><th>Status</th></tr></thead>
+<tbody>{''.join(rows)}</tbody></table></div>
+<form method="post" action="/admin/website" class="inline">{_csrf_field(h)}
+<label>Website address<input name="website_url" type="url" maxlength="{products.MAX_URL}" value="{e(site)}"
+placeholder="https://shieldsvpn.vercel.app/"></label><button class="btn primary">Save</button></form></section>
+<div class="cols"><section class="card"><h2>Account portal</h2><dl class="grid wide">
+<dt>Portal address</dt><dd>{_ext_link(cfg.public_url) if cfg.public_url.startswith("https://") else e(cfg.public_url)}</dd>
+<dt>HTTPS</dt><dd>{_on_off(h.portal.tls)}</dd>
+<dt>Who can sign in</dt><dd>{"Administrators only" if h.portal.admins_only() else "All users"}</dd>
+<dt>Public sign-up</dt><dd>{_on_off(h.portal.signup_enabled())}</dd>
+<dt>Email (codes, password reset)</dt><dd>{_on_off(mail_ready, "Ready", "Not set up")}</dd>
+<dt>2FA required for administrators</dt><dd>{_on_off(cfg.require_2fa_for_admins, "Yes", "No")}</dd></dl>
+<p class="small"><a href="/admin/settings#access">Portal access</a> &middot; <a href="/admin/settings#email">Email</a>
+&middot; <a href="/admin/audit">Audit log</a></p></section>
+<section class="card"><h2>Payments and ads on the web</h2><dl class="grid wide">
+<dt>Pro through Paddle</dt><dd>{_on_off(payments.ready(s), "On", "Off")}</dd>
+<dt>Paddle environment</dt><dd>{e(s.get("paddle_env", ""))}</dd>
+<dt>Pro plans on sale</dt><dd>{e(prices)}</dd>
+<dt>Ad page for the Windows app</dt><dd>{_on_off(devices.enabled(s, "web_ads_enabled"))}</dd></dl>
+<p class="small"><a href="/admin/settings#payments">Payment settings</a> &middot;
+<a href="/admin/settings#apps">Free time settings</a></p></section></div>""")
+
+
+def do_admin_website(h: Handler) -> None:
+    try:
+        url = products.clean_url(h.form.get("website_url", ""))
+    except ValueError as exc:
+        return page_admin_website(h, error=f"Website address: {exc}.")
+    h.portal.store.set_settings({"website_url": url})
+    h._audit("website_settings_changed", f"address {url or '(none)'}")
+    page_admin_website(h, notice="Website address saved.")
+
+
+def do_admin_website_check(h: Handler) -> None:
+    site = h.portal.settings().get("website_url", "")
+    if not site:
+        return page_admin_website(h, error="Set the website address first.")
+    checks = h.portal.check_pages(site)
+    bad = [c["name"] for c in checks if not c["ok"]]
+    h._audit("website_checked", "all pages answered" if not bad else f"failed: {', '.join(bad)}")
+    note = "Every page answered." if not bad else ""
+    page_admin_website(h, notice=note, error=f"Not answering: {', '.join(bad)}." if bad else "", checks=checks)
+
+
+def page_admin_extension(h: Handler, notice: str = "", error: str = "") -> None:
+    s, store, now = h.portal.settings(), h.portal.store, int(time.time())
+    ext = products.extension_info()
+    win = store.device_stats(now).get("windows", {})
+    online = store.online_device_counts(now - 60, now - devices.ACTIVE_SECONDS).get("windows", 0)
+    if ext:
+        perms = ", ".join(ext["permissions"]) or "none"
+        package = f"""<dl class="grid wide"><dt>Name</dt><dd>{e(ext['name'])}</dd><dt>Version</dt><dd>{e(ext['version'])}</dd>
+<dt>Manifest</dt><dd>Version {e(str(ext['manifest_version']))}</dd><dt>Permissions</dt><dd><code>{e(perms)}</code></dd>
+<dt>Chrome / Edge minimum</dt><dd>{e(ext['min_chrome'] or "-")}</dd><dt>Description</dt><dd>{e(ext['description'])}</dd></dl>"""
+    else:
+        package = ('<p class="muted">The extension\'s files (<code>browser-extension/</code>) are not on this server. '
+                   'They are built on the development PC with <code>python tools/build_extension.py</code>.</p>')
+    rows, fields = [], []
+    for key, (name, hosts) in products.STORES.items():
+        url = s.get(key, "")
+        rows.append(f'<tr><td>{e(name)}</td><td>{_on_off(bool(url), "Published", "Not published")}</td>'
+                    f'<td class="small">{_ext_link(url) if url else "&ndash;"}</td></tr>')
+        fields.append(f'<label>{e(name)}<input name="{key}" type="url" maxlength="{products.MAX_URL}" '
+                      f'value="{e(url)}" placeholder="https://{e(hosts[0])}/..."></label>')
+    h._html("Browser extension", f"""{_back()}<div class="product-head">{_icon("ext")}<div><h1>Browser extension</h1>
+<p class="muted">The ShieldsVPN companion for Chrome, Edge, Brave, Opera and Firefox: it shows the Windows app's VPN
+state and connects or disconnects it in one click.</p></div></div>{_notices(notice, error)}
+<div class="tiles"><div class="tile"><span class="tile-label">Version</span>
+<strong class="tile-num">{e(ext['version'] if ext else "-")}</strong></div>
+<div class="tile"><span class="tile-label">Stores</span><strong class="tile-num">{sum(bool(s.get(k)) for k in products.STORES)}/3</strong>
+<span class="muted small">published</span></div>
+<div class="tile"><span class="tile-label">Windows PCs</span><strong class="tile-num">{win.get('total', 0)}</strong>
+<span class="muted small">{win.get('active_week', 0)} active this week</span></div>
+<div class="tile"><span class="tile-label">Windows PCs online</span><strong class="tile-num">{online}</strong></div></div>
+<div class="cols"><section class="card"><h2>Package</h2>{package}</section>
+<section class="card"><h2>How it works</h2><ul class="small">
+<li>It needs the ShieldsVPN app for Windows; the VPN itself runs there and protects the whole PC.</li>
+<li>Its only permission is <code>nativeMessaging</code>: it cannot see the websites people visit and collects no
+data.</li>
+<li>The browser talks to the helper <code>com.shieldsvpn.native</code>, registered per Windows user with
+<code>python -m pqvpn browser-host install --chrome-id &lt;extension id&gt;</code>.</li>
+<li>Commands: status, connect, disconnect, start the app, open the app window. Nothing else crosses.</li>
+</ul></section></div>
+<section class="card"><h2>Store listings</h2><div class="table-wrap"><table><thead><tr><th>Store</th><th>Status</th>
+<th>Page</th></tr></thead><tbody>{''.join(rows)}</tbody></table></div>
+<p class="muted small">When a store approves the extension, paste its page here. Put the same address into
+<code>STORE_LINKS</code> in the website's <code>site.js</code> so its button turns into &ldquo;Add to &hellip;&rdquo;.</p>
+<form method="post" action="/admin/extension">{_csrf_field(h)}<div class="form-grid">{''.join(fields)}</div>
+<button class="btn primary">Save store pages</button></form></section>""")
+
+
+def do_admin_extension(h: Handler) -> None:
+    values = {}
+    for key, (name, hosts) in products.STORES.items():
+        try:
+            values[key] = products.clean_url(h.form.get(key, ""), hosts)
+        except ValueError as exc:
+            return page_admin_extension(h, error=f"{name}: {exc}.")
+    h.portal.store.set_settings(values)
+    h._audit("extension_links_changed", ", ".join(f"{products.STORES[k][0]}: {'set' if v else 'none'}"
+                                                  for k, v in values.items()))
+    page_admin_extension(h, notice="Store pages saved.")
+
+
+def page_admin_app(h: Handler) -> None:
+    s, store, now = h.portal.settings(), h.portal.store, int(time.time())
+    dev = store.device_stats(now)
+    online = store.online_device_counts(now - 60, now - devices.ACTIVE_SECONDS)
+    rewards_ = store.reward_stats(now)
+    users = {u["id"]: u for u in store.users()}
+    pro = sum(1 for d in store.vpn_devices() if (u := users.get(d["user_id"])) and
+              plans.effective_plan(u, now) == "premium")
+    total = {k: sum(p.get(k, 0) for p in dev.values()) for k in store.DEVICE_STATS}
+    names = {"android": "Android", "windows": "Windows"}
+    platform_rows = "".join(
+        f"<tr><td>{e(names.get(p, p))}</td><td>{d['total']}</td><td>{online.get(p, 0)}</td><td>{d['active_day']}</td>"
+        f"<td>{d['active_week']}</td><td>{d['new_week']}</td><td>{d['signed_in']}</td><td>{d['disabled']}</td></tr>"
+        for p, d in sorted(dev.items())) or '<tr><td colspan="8" class="muted">No app devices yet.</td></tr>'
+    newest = "".join(
+        f"""<tr><td><code>{e(d['subject'])}</code></td><td>{e(names.get(d['platform'], d['platform']))}</td>
+<td>{_device_plan(d, users, now)}</td><td class="small">{e(fmt_time(d['created_at']))}</td>
+<td class="small">{e(fmt_time(d['last_seen']))}</td></tr>""" for d in store.newest_vpn_devices(8)) or \
+        '<tr><td colspan="5" class="muted">No app devices yet.</td></tr>'
+    admob, web_ads = rewards_.get("admob", {}), rewards_.get("web", {})
+    play_on = h.portal.play.ready(s)
+    h._html("App", f"""{_back()}<div class="product-head">{_icon("app")}<div><h1>App</h1>
+<p class="muted">The ShieldsVPN apps for Android and Windows: phones and PCs that registered themselves (Free with
+ads, or Pro), what they use and how they pay.</p></div></div>
+<div class="tiles"><div class="tile"><span class="tile-label">Android phones</span>
+<strong class="tile-num">{dev.get('android', {}).get('total', 0)}</strong></div>
+<div class="tile"><span class="tile-label">Windows PCs</span><strong class="tile-num">{dev.get('windows', {}).get('total', 0)}</strong></div>
+<div class="tile"><span class="tile-label">Online now</span><strong class="tile-num">{sum(online.values())}</strong></div>
+<div class="tile"><span class="tile-label">Pro devices</span><strong class="tile-num">{pro}</strong></div>
+<div class="tile"><span class="tile-label">New today</span><strong class="tile-num">{total['new_day']}</strong>
+<span class="muted small">{total['new_week']} this week</span></div>
+<div class="tile"><span class="tile-label">Ads watched today</span>
+<strong class="tile-num">{admob.get('day', 0) + web_ads.get('day', 0)}</strong>
+<span class="muted small">{admob.get('week', 0) + web_ads.get('week', 0)} this week</span></div></div>
+<section class="card"><h2>Devices by platform</h2><div class="table-wrap"><table><thead><tr><th>Platform</th>
+<th>Registered</th><th>Online</th><th>Active 24 h</th><th>Active 7 days</th><th>New 7 days</th><th>Signed in</th>
+<th>Disabled</th></tr></thead><tbody>{platform_rows}</tbody></table></div></section>
+<div class="cols"><section class="card"><h2>Free plan and ads</h2><dl class="grid wide">
+<dt>Phones register themselves</dt><dd>{_on_off(devices.enabled(s, "app_enrollment"))}</dd>
+<dt>Rewarded ads (Android)</dt><dd>{_on_off(devices.enabled(s, "admob_enabled"))}</dd>
+<dt>Ad confirmation</dt><dd>{"Google's signed callback" if devices.enabled(s, "admob_require_ssv") else
+     '<span class="pill warn">Test mode</span>'}</dd>
+<dt>Free time per ad</dt><dd>{devices.number(s, "free_minutes")} min, used only while connected</dd>
+<dt>Ad on connect / disconnect</dt><dd>{e(devices.TOGGLE_ADS[devices.toggle_ads(s)])}{
+     f" (at most one per {devices.number(s, 'toggle_ad_gap')} s)" if devices.number(s, "toggle_ad_gap") else ""}</dd>
+<dt>Ads per device per day</dt><dd>{devices.number(s, "free_daily_rewards")}</dd>
+<dt>Devices with free time left</dt><dd>{total['with_free_time']}</dd>
+<dt>New devices per network per day</dt><dd>{devices.number(s, "enroll_per_ip_day")}</dd>
+<dt>Unused anonymous devices removed after</dt><dd>{devices.number(s, "device_cleanup_days")} days</dd></dl>
+<p class="small"><a href="/admin/settings#apps">App settings</a></p></section>
+<section class="card"><h2>Pro</h2><dl class="grid wide">
+<dt>Sign-in in the app</dt><dd>{_on_off(devices.enabled(s, "app_accounts"))}</dd>
+<dt>Google Play Billing</dt><dd>{_on_off(play_on, "Ready", "Off")}</dd>
+<dt>Play product</dt><dd><code>{e(s.get("play_product_id", ""))}</code></dd>
+<dt>Active Play subscriptions</dt><dd>{store.active_play_subscriptions(now)}</dd>
+<dt>Paddle (website and Windows)</dt><dd>{_on_off(payments.ready(s), "Ready", "Off")}</dd>
+<dt>Devices per account</dt><dd>{devices.number(s, "pro_device_limit")}</dd></dl>
+<p class="small"><a href="/admin/settings#play">Google Play</a> &middot; <a href="/admin/settings#payments">Paddle</a>
+</p></section></div>
+<section class="card"><div class="card-head"><h2>Newest devices</h2><a class="small" href="/admin/devices">All devices
+&rarr;</a></div><div class="table-wrap"><table><thead><tr><th>Device</th><th>Platform</th><th>Plan</th>
+<th>Registered</th><th>Last seen</th></tr></thead><tbody>{newest}</tbody></table></div>
+<p class="muted small">Each new installation shows the User Agreement first; the app registers only after it is
+accepted.</p></section>""")
 
 
 def _firebase_pill(st: dict) -> str:
@@ -2122,6 +2418,12 @@ ROUTES = [
     ("GET", r"/admin/devices", "admin", lambda h: page_admin_devices(h)),
     ("POST", r"/admin/devices/(?P<device_id>\d+)/(?P<action>signout|disable|enable|delete)", "admin",
      do_admin_device_action),
+    ("GET", r"/admin/website", "admin", lambda h: page_admin_website(h)),
+    ("POST", r"/admin/website", "admin", do_admin_website),
+    ("POST", r"/admin/website/check", "admin", do_admin_website_check),
+    ("GET", r"/admin/extension", "admin", lambda h: page_admin_extension(h)),
+    ("POST", r"/admin/extension", "admin", do_admin_extension),
+    ("GET", r"/admin/app", "admin", page_admin_app),
     ("GET", r"/static/(?P<name>[a-z.]+)", "public", static_file),
     ("GET", r"/favicon.ico", "public", favicon),
 ]
@@ -2198,6 +2500,23 @@ a.tile:hover{text-decoration:none;border-color:#a5b4fc}.tile .pill{align-self:fl
 .tile-label{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:700}
 .tile-num{font-size:28px;line-height:1.1}.quick{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 20px}
 .lead{margin:-8px 0 18px}main>.alert{margin:0 0 16px}.cols+.card{margin-top:20px}input.filter{max-width:300px;margin:0}tr[hidden]{display:none}
+dl.grid.wide{grid-template-columns:minmax(150px,1.1fr) 1fr}.section-title{margin:6px 0 12px;font-size:15px;
+color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.products{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px;margin:0 0 26px}
+.product{position:relative;display:flex;flex-direction:column;gap:6px;padding:20px;border-radius:18px;color:#fff;
+overflow:hidden;box-shadow:0 10px 26px rgba(15,23,42,.18);transition:transform .15s ease,box-shadow .15s ease}
+a.product:hover{text-decoration:none;transform:translateY(-2px);box-shadow:0 16px 34px rgba(15,23,42,.24)}
+.product--web{background:linear-gradient(135deg,#7c3aed,#4f46e5 55%,#0ea5e9)}
+.product--ext{background:linear-gradient(135deg,#0f766e,#0891b2 55%,#6366f1)}
+.product--app{background:linear-gradient(135deg,#be185d,#7c3aed 55%,#4f46e5)}
+.product__icon{width:34px;height:34px;padding:7px;border-radius:12px;background:rgba(255,255,255,.18)}
+.product__name{font-size:20px;font-weight:800;letter-spacing:-.01em}.product__sub{font-size:13.5px;opacity:.85}
+.product__facts{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.product__facts span{padding:3px 10px;border-radius:999px;background:rgba(255,255,255,.16);font-size:12.5px}
+.product__go{margin-top:8px;font-weight:700;font-size:13.5px}
+.product-head{display:flex;align-items:center;gap:14px;margin:0 0 18px}.product-head h1{margin:0}
+.product-head p{margin:2px 0 0}.product-head .product__icon{width:46px;height:46px;padding:10px;color:#fff;
+background:linear-gradient(135deg,#7c3aed,#4f46e5 55%,#0ea5e9)}
 label.choice{display:flex;gap:10px;align-items:flex-start;font-weight:400;font-size:14px;padding:10px 12px;
 border:1px solid var(--line);border-radius:10px;cursor:pointer}label.choice input{width:auto;margin:3px 0 0}
 """

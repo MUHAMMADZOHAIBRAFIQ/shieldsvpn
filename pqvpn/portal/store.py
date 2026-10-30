@@ -68,7 +68,8 @@ CREATE TABLE IF NOT EXISTS peers (
     last_handshake INTEGER,
     rx_bytes INTEGER,
     tx_bytes INTEGER,
-    updated_at INTEGER NOT NULL
+    updated_at INTEGER NOT NULL,
+    last_rx INTEGER  -- wall time of the last packet from the peer (NULL = not reported)
 );
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -108,12 +109,13 @@ CREATE TABLE IF NOT EXISTS vpn_devices (
     active_serial TEXT,
     cert_expires INTEGER,
     enabled INTEGER NOT NULL DEFAULT 1,
-    free_until INTEGER NOT NULL DEFAULT 0,
+    free_until INTEGER NOT NULL DEFAULT 0,  -- until 2026-10-31: Free time as an end time (now free_seconds)
     failed_logins INTEGER NOT NULL DEFAULT 0,
     locked_until INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     last_seen INTEGER NOT NULL,
-    enroll_ip TEXT
+    enroll_ip TEXT,
+    free_seconds INTEGER NOT NULL DEFAULT 0  -- Free time left; used up only while connected (access.py)
 );
 -- One row per "watch an ad for free time" attempt.  The nonce is stored hashed; granted_at is set once
 -- (single use) and provider_ref (the ad network's transaction id) is unique, so a replayed callback grants nothing.
@@ -179,7 +181,7 @@ CREATE INDEX IF NOT EXISTS vpn_devices_enroll ON vpn_devices (enroll_ip, created
 CREATE INDEX IF NOT EXISTS reward_grants_device ON reward_grants (device_id, granted_at);
 CREATE INDEX IF NOT EXISTS play_purchases_due ON play_purchases (replaced, expires);
 """
-VPN_DEVICE_FIELDS = {"user_id", "known_user_id", "active_serial", "cert_expires", "enabled", "free_until",
+VPN_DEVICE_FIELDS = {"user_id", "known_user_id", "active_serial", "cert_expires", "enabled", "free_seconds",
                      "failed_logins", "locked_until", "last_seen", "token_hash"}
 MAX_DEVICES_PER_USER = 20
 
@@ -194,6 +196,12 @@ class Store:
             for name, definition in USER_COLUMNS:
                 if name not in have:
                     db.execute(f"ALTER TABLE users ADD COLUMN {name} {definition}")
+            if "last_rx" not in {r["name"] for r in db.execute("PRAGMA table_info(peers)")}:
+                db.execute("ALTER TABLE peers ADD COLUMN last_rx INTEGER")
+            if "free_seconds" not in {r["name"] for r in db.execute("PRAGMA table_info(vpn_devices)")}:
+                db.execute("ALTER TABLE vpn_devices ADD COLUMN free_seconds INTEGER NOT NULL DEFAULT 0")
+                # Free time used to be an end time on the wall clock; whatever was left becomes the balance.
+                db.execute("UPDATE vpn_devices SET free_seconds = MAX(0, free_until - ?)", (int(time.time()),))
             db.execute("COMMIT")
             db.executescript(INDEXES)
 
@@ -347,6 +355,43 @@ class Store:
         row = self._one("SELECT COUNT(*) AS total, SUM(user_id IS NULL) AS anonymous FROM vpn_devices")
         return {"total": row["total"] or 0, "anonymous": row["anonymous"] or 0}
 
+    DEVICE_STATS = ("total", "signed_in", "disabled", "new_day", "new_week", "active_day", "active_week",
+                    "with_free_time")
+
+    def device_stats(self, now: int) -> dict[str, dict[str, int]]:
+        """App devices per platform for the admin pages: totals, sign-ins, activity and new registrations."""
+        day, week = now - 86400, now - 7 * 86400
+        rows = self._all(
+            "SELECT platform, COUNT(*) AS total, SUM(user_id IS NOT NULL) AS signed_in, SUM(enabled = 0) AS disabled,"
+            " SUM(created_at >= ?) AS new_day, SUM(created_at >= ?) AS new_week, SUM(last_seen >= ?) AS active_day,"
+            " SUM(last_seen >= ?) AS active_week, SUM(free_seconds > 0) AS with_free_time"
+            " FROM vpn_devices GROUP BY platform", (day, week, day, week))
+        return {r["platform"]: {k: int(r[k] or 0) for k in self.DEVICE_STATS} for r in rows}
+
+    def reward_stats(self, now: int) -> dict[str, dict[str, int]]:
+        """Watched ads that granted free time, per kind (admob / web), in the last day and week."""
+        rows = self._all("SELECT kind, SUM(granted_at >= ?) AS day, SUM(granted_at >= ?) AS week FROM reward_grants"
+                         " WHERE granted_at IS NOT NULL GROUP BY kind", (now - 86400, now - 7 * 86400))
+        return {r["kind"]: {"day": int(r["day"] or 0), "week": int(r["week"] or 0)} for r in rows}
+
+    def active_play_subscriptions(self, now: int) -> int:
+        row = self._one("SELECT COUNT(*) AS n FROM play_purchases WHERE replaced = 0 AND expires > ?", (now,))
+        return int(row["n"] or 0)
+
+    def online_device_counts(self, fresh_after: int, active_after: int = 0) -> dict[str, int]:
+        """App devices connected right now, per platform (the VPN server republishes ``peers`` every few seconds;
+        a list older than ``fresh_after`` means the server is down, so nobody is connected).  A device whose last
+        packet is older than ``active_after`` has gone (its session lingers on the server until it expires)."""
+        if self.server_heartbeat() < fresh_after:
+            return {}
+        rows = self._all("SELECT d.platform AS platform, COUNT(*) AS n FROM peers p"
+                         " JOIN vpn_devices d ON d.subject = p.username"
+                         " WHERE p.last_rx IS NULL OR p.last_rx >= ? GROUP BY d.platform", (active_after,))
+        return {r["platform"]: int(r["n"]) for r in rows}
+
+    def newest_vpn_devices(self, limit: int = 8) -> list[dict]:
+        return self._all("SELECT * FROM vpn_devices ORDER BY created_at DESC, id DESC LIMIT ?", (limit,))
+
     def touch_vpn_devices(self, subjects: list[str], now: int) -> None:
         if subjects:
             with self._db() as db:
@@ -357,12 +402,26 @@ class Store:
         return self._exec("DELETE FROM vpn_devices WHERE user_id IS NULL AND last_seen < ?",
                           (int(time.time()) - max_age,))
 
-    def add_free_time(self, device_id: int, seconds: int, now: int) -> int:
-        """Extend free time atomically (from now, or from the end of time already granted); return the new end."""
+    def add_free_seconds(self, device_id: int, seconds: int) -> int:
+        """Add Free time to a device's balance atomically; return the new balance (seconds)."""
         with self._db() as db:
-            db.execute("UPDATE vpn_devices SET free_until = MAX(free_until, ?) + ? WHERE id = ?",
-                       (now, seconds, device_id))
-            return db.execute("SELECT free_until FROM vpn_devices WHERE id = ?", (device_id,)).fetchone()[0]
+            db.execute("UPDATE vpn_devices SET free_seconds = free_seconds + ? WHERE id = ?", (seconds, device_id))
+            return db.execute("SELECT free_seconds FROM vpn_devices WHERE id = ?", (device_id,)).fetchone()[0]
+
+    def charge_free_seconds(self, charges: list[tuple[str, int]]) -> None:
+        """Use up Free time of connected devices: [(subject, seconds)], never below zero (one transaction)."""
+        if charges:
+            with self._db() as db:
+                db.executemany("UPDATE vpn_devices SET free_seconds = MAX(0, free_seconds - ?) WHERE subject = ?",
+                               [(sec, subject) for subject, sec in charges])
+
+    def is_connected(self, subject: str, fresh_after: int, active_after: int = 0) -> bool:
+        """The VPN server lists this peer (and is itself alive: heartbeat after ``fresh_after``) and its last packet
+        came after ``active_after`` -- a disconnected client sends nothing, but its session lingers until it expires."""
+        if self.server_heartbeat() < fresh_after:
+            return False
+        return self._one("SELECT 1 AS x FROM peers WHERE username = ? AND (last_rx IS NULL OR last_rx >= ?)",
+                         (subject, active_after)) is not None
 
     # -------------------------------------------------------------- ad rewards
     def create_reward(self, device_id: int, kind: str, nonce_hash: str) -> int:
@@ -581,8 +640,9 @@ class Store:
             db.execute("DELETE FROM peers")
             db.executemany(
                 "INSERT INTO peers (username, endpoint, address, suite, key_alg, connected_since, last_handshake,"
-                " rx_bytes, tx_bytes, updated_at) VALUES (:username, :endpoint, :address, :suite, :key_alg,"
-                " :connected_since, :last_handshake, :rx_bytes, :tx_bytes, " + str(now) + ")", rows)
+                " rx_bytes, tx_bytes, last_rx, updated_at) VALUES (:username, :endpoint, :address, :suite, :key_alg,"
+                " :connected_since, :last_handshake, :rx_bytes, :tx_bytes, :last_rx, " + str(now) + ")",
+                [{"last_rx": None, **r} for r in rows])
             db.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('server_heartbeat', ?)", (str(now),))
             db.execute("COMMIT")
 
