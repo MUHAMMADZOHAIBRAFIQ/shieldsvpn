@@ -8,3 +8,7 @@ tests/
 pyproject.toml
 deploy/
 docs/
+# Drafts with [PLACEHOLDERS] (owner name, contact email, retention periods): published once filled in, because
+# Google Play needs a privacy-policy and an account-deletion URL.
+public/privacy.html
+public/delete-account.html

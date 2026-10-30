@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Privacy policy — ShieldsVPN</title>
+<meta name="description" content="What ShieldsVPN stores, why, for how long, and your choices.">
+<style>
+  :root{--bg:#0b1020;--ink:#e2e8f0;--muted:#94a3b8;--line:#1e293b;--card:#111a2e;--brand:#a5b4fc}
+  *{box-sizing:border-box} html,body{margin:0}
+  body{font:16px/1.65 "Segoe UI",system-ui,-apple-system,Roboto,sans-serif;color:var(--ink);background:var(--bg)}
+  main{max-width:820px;margin:0 auto;padding:32px 20px 64px}
+  a{color:var(--brand)} h1{font-size:30px;margin:0 0 4px} h2{font-size:20px;margin:32px 0 8px}
+  .muted{color:var(--muted)} table{width:100%;border-collapse:collapse;font-size:14.5px;margin:12px 0}
+  th,td{text-align:left;vertical-align:top;padding:8px 10px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-weight:600} .table{overflow-x:auto} li{margin:4px 0}
+  .note{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px}
+</style>
+</head>
+<body>
+<main>
+<p><a href="/">&larr; ShieldsVPN</a></p>
+<h1>Privacy policy</h1>
+<p class="muted">Last updated: [DATE]. Applies to the ShieldsVPN apps for Android and Windows, the browser extension,
+and the ShieldsVPN website and account portal.</p>
+<p>ShieldsVPN is operated by [OWNER OR COMPANY NAME], [POSTAL ADDRESS] ("we"). Contact: [CONTACT EMAIL].</p>
+
+<h2>What we never collect</h2>
+<p>We do not log the websites or apps you use, the content of your traffic, or your DNS queries. The VPN server
+forwards your encrypted traffic and keeps no record of where it goes. The app does not read, inspect or sell the
+traffic that passes through Android's VPN service.</p>
+
+<h2>What we store, and why</h2>
+<div class="table"><table>
+<tr><th>Data</th><th>Why</th><th>How long</th></tr>
+<tr><td>A random device name, the device's tunnel address, the public part of its key and its certificate</td>
+<td>To let your device connect to the VPN</td><td>Until you delete the app's registration or your account; devices
+without an account are deleted after 30 days without use</td></tr>
+<tr><td>The IP address that registered the device</td><td>To limit abuse (registrations per network per day)</td>
+<td>As long as the device record</td></tr>
+<tr><td>Free-time balance and ad-reward records (time, the ad network's transaction id)</td><td>To grant free time
+and enforce daily limits</td><td>Reward records: 7 days</td></tr>
+<tr><td>Live connection data: your public IP address and port, connection start time, bytes sent and received</td>
+<td>To run the connection and show the administrator who is online</td><td>Overwritten every few seconds; removed
+when you disconnect</td></tr>
+<tr><td>Account (optional, needed for Pro): email address, password (stored only as a scrypt hash), optional
+two-factor secret, plan and its end date</td><td>Sign-in, Pro, password recovery</td><td>Until you delete the
+account</td></tr>
+<tr><td>Purchase records: for Google Play, the purchase token, plan, state and end date; for Paddle, the customer and
+subscription id, amount, currency and status. Never card numbers.</td><td>To confirm and renew Pro</td><td>Google Play
+records: until the account is deleted. Paddle payment records: [RETENTION FOR ACCOUNTING]</td></tr>
+<tr><td>Security log: sign-ins, failed sign-ins, password resets, plan changes and account deletion, with IP
+address</td><td>To protect accounts and investigate abuse</td><td>[RETENTION PERIOD]</td></tr>
+</table></div>
+
+<h2>Third parties</h2>
+<ul>
+<li><strong>Google AdMob</strong> (Free plan in the Android app). Google's Mobile Ads SDK collects device information,
+including the advertising ID and IP address, to show and measure ads, and may personalise them where you consent.
+Where the law requires it you are asked first. See
+<a href="https://policies.google.com/technologies/partner-sites">how Google uses information from sites or apps that
+use its services</a>.</li>
+<li><strong>Google Play Billing</strong> (Pro in the Android app from Google Play). Google processes the payment; we
+receive the purchase details listed above. See the <a href="https://policies.google.com/privacy">Google Privacy
+Policy</a>.</li>
+<li><strong>Paddle</strong> (Pro bought on the website or in the Windows app). Paddle.com is our reseller and merchant
+of record and processes your card and billing details. See <a href="https://www.paddle.com/legal/privacy">Paddle's
+privacy policy</a>.</li>
+<li><strong>Email</strong>. Verification and password-reset codes are sent through [EMAIL PROVIDER].</li>
+<li><strong>DNS resolvers</strong>. While connected, your name lookups are answered by the DNS servers of your plan
+([RESOLVERS, e.g. Quad9 / Cloudflare]); they see the lookups coming from our server, not from your device.</li>
+<li><strong>[Optional] Firebase</strong>. If we enable it, a copy of account names, emails, plans, connection status
+and the security log is kept in Google Firebase. Passwords, two-factor secrets and codes are never copied.</li>
+</ul>
+
+<h2>Your choices and rights</h2>
+<ul>
+<li>Use the Free plan without an account.</li>
+<li>Delete your account in the Android app (Your plan &rarr; Delete account) or as described on
+<a href="delete-account.html">Delete your ShieldsVPN account</a>. Deleting the account does not cancel a
+subscription: cancel it in Google Play or through Manage subscription.</li>
+<li>Ask for a copy of your data, or correction or deletion of it: [CONTACT EMAIL].</li>
+<li>Change ad consent in the app's ad consent form, or reset or delete your advertising ID in Android settings.</li>
+</ul>
+
+<h2>Security</h2>
+<p>Connections use post-quantum cryptography (ML-KEM and ML-DSA, with an SLH-DSA root of trust, together with
+classical X25519), and the account portal uses HTTPS. On your phone the device key is protected by the Android
+Keystore; on Windows by DPAPI. No system is perfectly secure; report problems to [CONTACT EMAIL].</p>
+
+<h2>Children</h2>
+<p>ShieldsVPN is not directed at children and is meant for adults (18+).</p>
+
+<h2>Changes</h2>
+<p>We will post changes on this page and update the date above.</p>
+<p class="note muted">[REVIEW BEFORE PUBLISHING: fill in every bracketed part and have the policy checked for the
+laws that apply to you, for example the EU/UK GDPR and Pakistan's data-protection rules.]</p>
+</main>
+</body>
+</html>

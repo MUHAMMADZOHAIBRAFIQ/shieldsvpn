@@ -15,14 +15,17 @@ pqvpn-*.zip
 *.db-shm
 *.db.bak*
 portal-secrets.key
-# Firebase service-account keys (full admin access to the Firebase project)
+# Firebase / Google Play service-account keys (full access to the Firebase project / Play orders)
 firebase-key*.json
+play-key*.json
 *-firebase-adminsdk-*.json
 # Android signing material
 *.jks
 *.keystore
 keystore.properties
 android/keystore.properties
+# Android app deployment settings (portal address, certificate pin, AdMob IDs)
+deploy.properties
 # Environment files
 .env
 .env.*
@@ -35,5 +38,6 @@ __pycache__/
 .pytest-*.txt
 .venv*/
 node_modules/
+browser-extension/dist/
 wintun.dll
 research/results/raw/

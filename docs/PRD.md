@@ -84,7 +84,7 @@ Status: **Done**, **Partial**, **Not started**.
 | U2 | "Connected" is shown only after an authenticated handshake and a working tunnel, never just because a service started | P0 | Done |
 | U3 | Live details: connected time, server, tunnel IP, encryption, routing mode, DNS, live up/down traffic | P1 | Done (Android); partial (desktop) |
 | U4 | Automatic recovery from network changes (Wi-Fi ↔ mobile), server restarts and outages without user action | P0 | Done |
-| U5 | **No manual profile step for the user**: install, tap Start, connected. The app obtains its credentials automatically and securely. | P0 | **Not started.** Today an admin (or the user, if allowed) downloads a profile ZIP from the portal and imports it into the app once. Needs a device-enrollment API (see SPEC §11.1). |
+| U5 | **No manual profile step for the user**: install, tap Start, connected. The app obtains its credentials automatically and securely. | P0 | **Done** for builds with a portal address (`deploy.properties`): the app registers itself on first start (SPEC §16). Windows: `pqvpn app --portal ...` once. Verified on the API 36 emulator against a local portal; not yet through playit.gg or on a real phone |
 | U6 | Full-tunnel mode sends all traffic (including DNS) through the VPN; refuses to connect rather than leak DNS | P0 | Done (Android fails closed); portal option `full_tunnel` |
 | U7 | Kill switch: support the OS-level always-on/lockdown VPN and show honestly whether it is on | P1 | Done (Android); not available on Windows |
 | U8 | Server/location picker | P2 | Not started (one server today) |
@@ -97,9 +97,9 @@ Status: **Done**, **Partial**, **Not started**.
 | A1 | Two plans: Free and Premium. Premium can have an end date, after which the user drops back to Free automatically | P0 | Done |
 | A2 | Premium benefit: filtering DNS (ads, trackers, malware) chosen per plan by the admin; per-user DNS override | P0 | Done |
 | A3 | Public sign-up with email + password and email verification (6-digit code), behind an admin switch (default off) | P1 | Done |
-| A4 | Premium requires sign-in (mandatory account) | P0 | Done in the portal; the apps don't sign in yet |
+| A4 | Premium requires sign-in (mandatory account) | P0 | Done: portal, Android app (verified on the emulator) and Windows window (dialogs; screenshot-verified, not driven end to end) |
 | A5 | "Sign in with Google" | P1 | Not started (needs a domain with HTTPS and Google OAuth setup) |
-| A6 | Card payment for Premium via a Merchant-of-Record provider that serves Pakistan (Paddle, Lemon Squeezy or 2Checkout; Stripe is not available to Pakistani businesses). Payment success upgrades the plan automatically via a signed webhook | P0 for paid launch | Not started (upgrade page has a disabled placeholder button) |
+| A6 | Card payment for Premium via a Merchant-of-Record provider that serves Pakistan (Paddle, Lemon Squeezy or 2Checkout; Stripe is not available to Pakistani businesses). Payment success upgrades the plan automatically via a signed webhook | P0 for paid launch | **Partial:** Paddle Billing integration built (checkout, verification through Paddle's API, signed webhooks, renewals). Tested against a fake Paddle API and in a real browser (Paddle.js loads); **not yet tried with a real Paddle sandbox account**. Paddle's acceptance of a VPN product and a Pakistani seller is unconfirmed |
 | A7 | Password recovery by emailed one-time code | P0 | Done |
 | A8 | Users can download/replace their own profile when self-service is enabled | P1 | Done |
 
@@ -214,8 +214,8 @@ Status: **Done**, **Partial**, **Not started**.
 
 1. Which always-on host (and budget ceiling per month)?
 2. Which payment provider will onboard the business, and what Premium price?
-3. Should Free users be anonymous devices (no account) and only Premium users have accounts, as the owner described,
-   or should every device be tied to an account for abuse handling?
+3. ~~Should Free users be anonymous devices (no account) and only Premium users have accounts?~~ Decided
+   2026-10-22: yes. Free devices are anonymous; abuse is bounded by per-IP registration limits and the daily ad cap.
 4. Keep the shared PSK for consumer profiles, or rely on certificates only?
 5. Which Premium extras beyond filtering DNS (more locations, priority capacity)?
 
@@ -229,3 +229,4 @@ Status: **Done**, **Partial**, **Not started**.
 | 2026-10-10 | Vercel cannot host the VPN; it serves the landing page only. Laptop + Kali VM + playit.gg UDP tunnel used as a free test server. One-tap desktop app built. Freemium direction: public sign-up behind an off-by-default switch; payments and Google sign-in deferred until a domain and provider exist |
 | 2026-10-17 | Native Android app built on `VpnService` running the same protocol (no WireGuard substitute). Security/reliability pass: DNS-leak fail-closed, always-on support, secret hygiene, batched UDP receive, traffic-analysis study (no padding added: no measured benefit) |
 | 2026-10-18 | Portal option to issue full-tunnel profiles; clearer profile download button; optional Android release signing |
+| 2026-10-22 | Freemium model decided and built: Free needs no account and earns 30 min per watched ad (Android rewarded video, Windows web ad page; server-enforced), interstitial on connect; Pro needs sign-in and is paid through Paddle (sandbox first); price set by the admin; Android and Windows. Test through playit.gg before buying a domain; several server locations later. All new features off by default |

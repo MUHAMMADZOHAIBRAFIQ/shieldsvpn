@@ -82,10 +82,117 @@
   * The service-account key grants admin rights over the Firebase project. It is stored next to the database with mode 0600 and never shown again in the UI. The signed RS256 assertion is always sent to Google's fixed token endpoint (`oauth2.googleapis.com`) over verified TLS: the `token_uri` inside a pasted key is validated but **never used as a request URL**, and the `project_id` is validated, so a tampered key cannot redirect the request (or the assertion) to an attacker's server. Malformed responses from Google are reported as errors rather than crashing the mirror.
 * **Two independent checks before VPN access:**
   1. A certificate from the trusted CA.
-  2. An enabled portal account whose *current* profile serial matches that certificate.
+  2. An enabled portal account whose *current* profile serial matches that certificate — or, for a device
+     registered by the apps, an enabled device with that serial, an enabled linked account (if any), and for
+     Free devices unused free time.
 
-  Old profiles and disabled users are rejected at handshake time and dropped from live sessions within about 2 s.
+  Old profiles, disabled users and devices, and Free devices whose time ran out are rejected at handshake time
+  and dropped from live sessions within about 2 s.
 * **Plain HTTP is limited.** Without TLS, the portal refuses to listen anywhere except loopback and VPN-tunnel addresses. Put a real certificate on it before exposing it.
+
+## Apps: Free with ads, sign-in and Pro
+
+Added 2026-10-22 (`portal/devices.py`, `api.py`, `rewards.py`, `payments.py`, `accounts.py`). Every switch is off
+by default (Admin → Settings → Apps / Payments).
+
+* **Device registration without an account.** The app generates its ML-DSA key on the device and sends only the
+  public key; the portal issues a certificate whose subject is a random device name (`d-` + 24 base32 chars) and a
+  256-bit bearer token stored only as a SHA-256 hash. Registrations are rate-limited per IP (per minute and per
+  day). ML-DSA public keys cannot be validated beyond their length, so a script could register keys it cannot use;
+  that costs only a tunnel address, which is freed after 30 days unused.
+* **The shared PSK is no longer secret once registration is on.** Every registered device receives the server's
+  PSK, so anyone can obtain it. Sessions stay protected by ML-KEM + X25519 and the certificates; only the PSK's
+  extra layer is lost, for every client. Dropping the PSK for app devices needs a server that accepts both — a
+  policy change, not a wire change — and is a later decision (PRD open question 4).
+* **Free time is enforced by the VPN server**, not the app: `PortalAccess` refuses the handshake and drops live
+  sessions when `free_until` has passed. A modified app gains nothing.
+* **Proof of a watched ad.**
+  * *Android (AdMob):* time is granted by Google's server-side-verification callback, whose ECDSA P-256 signature
+    is checked with OpenSSL against Google's published keys (fetched only from the fixed `gstatic.com` URL). The
+    portal's one-time nonce travels in `custom_data` and the transaction id is single-use, so callbacks cannot be
+    replayed or moved to another device. Google can only reach a public HTTPS address; until there is one, the
+    admin can switch on **test mode** (`admob_require_ssv` off), in which the app's own report is trusted — a
+    modified app can then fake ads. Test mode is labelled as such and must be off at launch.
+  * *Windows (web page):* the portal measures the minimum viewing time itself and each link is single-use, but a
+    web page cannot prove that a person watched an ad. The daily per-device cap bounds the abuse.
+* **App API.** Bearer tokens only; the portal's session cookie is ignored on `/api/v1/`, so there is no CSRF
+  surface. Cross-site `Origin` headers are refused, bodies must be JSON (≤ 64 KiB), and the Host allow-list still
+  applies. App sign-in uses the same scrypt hashes, 2FA and lockout as the web: the device that last signed in to
+  an account has its own failure bucket, every other client shares the account's, so registering new devices does
+  not buy extra guesses. Sign-up and password reset share `accounts.py` with the web pages (no enumeration,
+  single-use hashed codes). An account can be signed in on at most `pro_device_limit` devices.
+* **Abuse limits** (security review 2026-10-23). Every authenticated app call is rate-limited per device (20 at once,
+  then one every 3 s). `/renew` is accepted only within 15 days of certificate expiry, because each issuance costs an
+  SLH-DSA signature (~315 ms with the default CA): renewal on demand let one free device keep a CPU core busy.
+  Unfinished checkouts are capped at 5 per account per hour, so an account cannot flood the Paddle account with
+  transactions. The checkout thank-you page, which asks Paddle's API, is rate-limited per IP.
+* **Plain HTTP behind a tunnel.** A tunnel agent (playit.gg, ngrok) connects to the portal from loopback, which the
+  listen check allows. The portal therefore refuses to start without TLS when `public_url` or `allowed_hosts` names
+  a domain or a public IP (override: `allow_insecure_http`). Android release builds never allow `http://` portals.
+* **Open issue: client addresses behind a tunnel.** Through a playit.gg TCP tunnel every request arrives from
+  127.0.0.1, so the per-IP limits (sign-in, sign-up, password reset, 20 registrations per day) are shared by all
+  users, and the audit log cannot show real IPs. One attacker can exhaust them for everyone (denial of service, not
+  account takeover: per-account lockout and per-device limits still work). Fix before a public launch: a real domain
+  without a tunnel, or PROXY-protocol support in the portal together with playit's PROXY-protocol option.
+* **Certificate pinning.** While the portal runs with a self-signed certificate behind playit.gg, the apps pin the
+  SHA-256 of that exact certificate and check it right after the TLS handshake, before sending anything
+  (`account_client.py`). Without a pin they use normal CA and host-name verification. Plain `http://` is accepted
+  only when a build explicitly allows it (emulator testing).
+* **Payments (Paddle, merchant of record).** No card data reaches the portal: cards are typed into Paddle's own
+  frame. The portal creates each transaction itself (price and account fixed server-side) and switches Pro on
+  only from data it fetched from Paddle's API: paid status, our account id in `custom_data`, the configured price,
+  and an active subscription. Webhooks are verified (`Paddle-Signature` HMAC-SHA256, 5-minute window) and only
+  trigger that same API check. The Paddle API key and webhook secret are sealed with the vault like the SMTP
+  password. Only the `/pay/<code>` page relaxes the CSP, and only for Paddle's CDN and checkout frame.
+* **Device secrets at rest.** Android: key, PSK and device token sealed with the Android Keystore (as before).
+  Windows: the key file is PKCS#8-encrypted by OpenSSL with a random passphrase; that passphrase and the device
+  token are sealed with DPAPI for the current Windows user.
+* **Ads and privacy.** The Google Mobile Ads SDK collects device data (for example the advertising ID) under
+  Google's terms. Google's consent form (UMP) is shown where the law requires it. The VPN still keeps no traffic
+  logs, but "we collect nothing" is no longer true for Free users of the Android app: the privacy policy must say
+  so (draft in [PRIVACY_POLICY_DRAFT.md](PRIVACY_POLICY_DRAFT.md)). The app's own sockets are excluded from the
+  tunnel, but ad requests made by Google Play services go through the tunnel like any other app's traffic while
+  connected (observed on the emulator), so they need the pushed DNS to work.
+* **Google Play purchases** (play.py). The portal decides, never the app: each token is checked with Google's API
+  (product, state, end date) and must carry the signed-in account's obfuscated reference, an HMAC under a vault
+  subkey that clients cannot compute, so a token bought for one account cannot be claimed by another; a token is
+  bound to the first account that verifies it. Tokens are never logged. The service-account key (`play-key.json`,
+  0600) is checked with Google before it is stored and is never shown again.
+* **Account deletion from the app** needs the password (and the TOTP code with 2FA); failures count toward the same
+  lockout as sign-in, and administrators cannot delete themselves from an app.
+* **Browser companion** ([BROWSER_EXTENSION.md](BROWSER_EXTENSION.md)): the extension has only `nativeMessaging`; the
+  host relays five fixed commands; the tray app's control channel is loopback-only, token-authenticated (constant-time
+  compare, 4 KiB line limit, 5 s timeout) and offers status, connect and disconnect only.
+
+## Security review of 2026-10-30
+
+A review of the whole code base (VPN protocol and server, portal, app API, payments, Android and Windows apps, the
+browser companion, npm dependencies). Each fix has a regression test in `tests/test_security_fixes.py`.
+
+| Finding | Severity | Fix |
+| --- | --- | --- |
+| A deleted account's id was handed to the next new account (SQLite reuses the highest rowid). Paddle (`custom_data`) and Google Play (account reference) name accounts by id, so the new account could claim the old one's still-running subscription. | Medium | Ids are never reused (`users_id_floor` in `meta`). |
+| A password reset or change ended portal sessions but left phones and PCs signed in, so whoever had taken over an account kept its Pro access on their device. | Medium | Resets and changes also sign the account out of every app device. |
+| The Windows tray opened the server-pushed portal address with `explorer.exe`, which also opens files and starts programs: a malicious or compromised VPN server could start a program on a client PC. | Medium | Only `http(s)://` addresses are opened (tray and window app). |
+| Sign-up did one scrypt less for an email that already had a verified account, so its timing told which addresses are registered. | Low | Every branch does the same hashing work. |
+| AdMob callbacks read parameters from the whole query string, including anything appended after Google's signature. | Low | Parameters come only from the signed part; only `signature` and `key_id` may follow it. |
+| Account deletion in the app stopped working when app sign-in was switched off. | Low | Deletion is always available to a signed-in account. |
+| Verifying an email re-enabled an account an administrator had disabled before verification. | Low | Verification no longer touches `enabled`. |
+| PowerShell shortcut creation put paths in quotes unescaped (a path with an apostrophe broke out). | Low (local) | Every value is quoted. |
+| Nodemailer ≤ 10.1.3: address-parser advisories GHSA-8c8m-p3m8-cjg8, GHSA-m943-m63m-w62w, GHSA-85x2-q946-cp5h (not reachable: addresses are validated first). | Low | Upgraded to 10.1.7; `npm audit` clean (mailer and Android UI). |
+
+Open (need a deployment decision, not a code change):
+
+* **Rate limits behind a TCP tunnel or reverse proxy.** The portal limits by source IP. Behind playit.gg or a proxy
+  every request comes from one address, so the limits become global: 20 app registrations per day for *everyone*,
+  and one attacker can exhaust the sign-in rate limit for all users. Serve the portal directly with TLS (its own
+  certificate) for a public launch, or add PROXY-protocol / trusted-proxy support first.
+* **Slow-connection DoS on the stdlib HTTP server.** One thread per connection with a 30 s timeout; many slow
+  clients can tie up threads. A reverse proxy with connection limits in front (once client IPs are passed through)
+  is the usual answer.
+* TOTP secrets are stored unsealed in `portal.db` (password hashes are too); the database file must stay private.
+* The desktop client accepts the addresses the server pushes without checking them against its certificate (the
+  Android client checks). The server is authenticated, so this only matters for a compromised server.
 
 ## Operational security checklist
 
@@ -97,3 +204,5 @@
 * Optionally enable `psk_file` (`pqvpn genpsk`) for defence in depth.
 * Keep `portal-secrets.key` `0600` and back it up apart from `portal.db`. Delete any old plaintext database backups made before encryption-at-rest was added (they still contain the App Password in the clear).
 * Administrators enrol an authenticator app at first sign-in (enforced). Protect the recovery mailbox with its own 2FA; an email reset does not bypass portal 2FA but does reset the password.
+* Before exposing the portal to the internet (for example through a playit.gg TCP tunnel), change any test admin password and keep `require_2fa_for_admins = true`.
+* Turn AdMob **test mode** off (`admob_require_ssv` on) and use real ad unit IDs before launch; switch Paddle from sandbox to live only with a real domain and an approved Paddle account.

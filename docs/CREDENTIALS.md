@@ -16,6 +16,15 @@ keys, PSKs, passwords or tokens into issues, chats, screenshots or this file.
 | Key passphrase files | `*_passphrase_file` | Next to the key | Unlocks the matching encrypted key. |
 | Android release keystore and properties | `*.jks`, `keystore.properties` | Release machine | App-update impersonation on users' phones. |
 | Firebase or other service-account JSON | `*firebase*.json` | Portal host | Access to that cloud project. |
+| Google Play service-account JSON | `play-key.json` next to `portal.db` (0600) | Portal host | Reading and managing the app's orders and subscriptions in Play Console (refunds, cancellations). |
+| Tray control token | `%LOCALAPPDATA%\pqvpn\tray-control.json` (rewritten at every tray start) | One PC, one Windows user | Connecting or disconnecting that PC's VPN; nothing else. |
+| App device token (256-bit, bearer) | Android: Keystore-sealed `profile.secrets`; Windows: DPAPI-sealed in `%LOCALAPPDATA%\pqvpn\device\account.json` | One app device | Acting as that device in the app API (its plan, its sign-in). The portal stores only a SHA-256 hash. |
+| Windows device key passphrase | DPAPI-sealed in `account.json` | One PC | Decrypts that PC's `device.key`. |
+| Paddle API key, webhook secret | `settings` table, sealed `enc:v1:` with `portal-secrets.key` | Portal host | API key: create transactions, read customers and subscriptions. Webhook secret: forge webhook events (which only trigger a re-check against Paddle's API). |
+
+Not secret, but deployment-specific (kept out of git in `android-app/deploy.properties`): the portal URL, the
+portal TLS certificate pin (a SHA-256 fingerprint of a public certificate) and the AdMob app and ad-unit IDs.
+Paddle's client-side token (`test_…`/`live_…`) is public by design: it is sent to every browser on the pay page.
 
 Configuration files (`server.toml`, `client.toml`, `portal.toml`) refer to secrets **by path**. Keep it that way:
 never inline a secret into a config file. Templates with placeholders are in [deploy/examples/](../deploy/examples/).
@@ -82,6 +91,12 @@ The PSK is shared by the server and every client, so rotating it requires reissu
 
 To avoid a hard cut-over, schedule it and announce it. pqvpn deliberately has no "accept two PSKs" mode.
 
+**App-registered devices** also hold the PSK (every registration receives it, so with registration switched on the
+PSK is effectively public; see [SECURITY.md](SECURITY.md)). They pick up a new PSK only when they renew their
+certificate. After a rotation they cannot connect until they register again (Android: Remove profile, then Set
+up; Windows: delete `%LOCALAPPDATA%\pqvpn\device` and run `pqvpn app --portal ...`). Automatic PSK refresh for
+app devices is not built.
+
 ### C. Server key
 
 Issue a new server certificate from the CA (`pqvpn issue --role server ...`), replace `server.key`/`server.crt`
@@ -96,7 +111,24 @@ and restart. Clients are unaffected, because they trust the CA and the server na
 
 Revoking a live CA cuts off every user at once, so plan it as an outage. It needs the operator's decision.
 
-### E. Android release keystore
+### E. An app device (lost phone or PC, leaked token)
+
+Admin → **App devices** → *Delete* (or *Disable*). The device's certificate stops working within about 2 s and its
+token is gone; if the person reinstalls, the app registers as a new Free device. Signing the account in again on
+the new device is all that is needed for Pro.
+
+### F. Paddle API key or webhook secret
+
+Create a new key (Paddle → Developer tools → Authentication) or a new notification destination secret, paste it
+in Admin → Settings → Payments (an empty field keeps the saved value), then revoke the old one in Paddle.
+
+### F2. Google Play service-account key
+
+Create a new JSON key for the service account in Google Cloud, paste it in Admin → Settings → Google Play Billing
+(the portal checks it with Google before keeping it), then delete the old key in Google Cloud. If the account itself
+may be compromised, remove its access in Play Console → Users and permissions first.
+
+### G. Android release keystore
 
 Losing or leaking the keystore cannot be fixed by rotation on the Play Store unless Play App Signing is used.
 Before the first public release:

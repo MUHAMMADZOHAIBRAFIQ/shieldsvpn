@@ -23,12 +23,15 @@ Never rename them: live deployments, imports and certificate subjects depend on 
 ```bash
 python -m pqvpn selftest                          # handshake + traffic for every suite (needs OpenSSL >= 3.5)
 python -m pqvpn algorithms                        # shows which OpenSSL was loaded
-python -m unittest discover -s tests -v           # all Python tests (~112, ~1 min); pytest -q also works
+python -m unittest discover -s tests -v           # all Python tests (~137, ~1.5 min); pytest -q also works
 python tools/secret_scan.py                       # must report 0 findings before any commit
 python tools/secret_scan.py <file.apk>            # before publishing an APK
 
 cd android-app && ./gradlew testDebugUnitTest assembleDebug   # JVM + Vitest tests, debug APK (needs Node >= 22.12)
 cd android-app/ui && npm ci && npm test                         # React UI tests only; `npm run dev` = mock bridge
+cd android-app && ./gradlew bundleRelease -Pshieldsvpn.deploy=<play deploy.properties>   # Play Store .aab (store=play)
+python tools/build_extension.py                                 # browser extension store ZIPs (browser-extension/dist)
+python tools/play_graphics.py [--check-listing]                 # Play icon / feature graphic; listing length check
 ```
 
 **OpenSSL selection.** `pqvpn/crypto/ossl.py` loads libcrypto at import time; point `PQVPN_LIBCRYPTO` at a 3.5+ build
@@ -59,10 +62,23 @@ pqvpn/runner.py           run_server / run_client / selftest
 pqvpn/cli.py              every `python -m pqvpn <command>`
 pqvpn/portal/web.py       all portal pages + ROUTES table (one file, server-rendered HTML)
 pqvpn/portal/store.py     SQLite schema + migrations (USER_COLUMNS), shared with the VPN server
-pqvpn/portal/access.py    PortalAccess: per-handshake account check + live peer publishing
+pqvpn/portal/access.py    PortalAccess: per-handshake account/device check (incl. Free time) + live peer publishing
 pqvpn/portal/service.py   profile ZIP issuance, portal-init
 pqvpn/portal/{auth,plans,mail,vault,firebase,qr}.py
-pqvpn/android_client.py   profile import, tunnel_settings() validation, AndroidTun, Session
+pqvpn/portal/devices.py   app devices: registration, Free time from ads, Pro, device limit (SPEC §16)
+pqvpn/portal/api.py       /api/v1/ JSON API for the apps (bearer tokens, never the session cookie)
+pqvpn/portal/accounts.py  sign-up / password reset shared by web.py and api.py
+pqvpn/portal/rewards.py   AdMob server-side-verification signature check
+pqvpn/portal/payments.py  Paddle Billing: checkout links, reconcile from Paddle's API, webhooks
+pqvpn/portal/play.py      Google Play Billing for the Play build: purchase-token checks with Google's API, reconcile
+pqvpn/portal/google.py    Google service-account sign-in (JWT bearer) shared by firebase.py and play.py
+pqvpn/control.py          tray app's loopback control channel (token) for the browser extension
+pqvpn/native_host.py      browser native-messaging host + per-user registration (`pqvpn browser-host install`)
+browser-extension/        MV3 companion extension (nativeMessaging only); `tools/build_extension.py` builds store ZIPs
+docs/play-store/          Play Console texts, Data safety, App content declarations, graphics, release plan
+pqvpn/account_client.py   the apps' portal client (TLS pinning, profile writing); packaged in the APK
+pqvpn/desktop_account.py  Windows/desktop device registration (DPAPI-sealed token and key passphrase)
+pqvpn/android_client.py   profile import, enroll/renew/api_json, tunnel_settings() validation, AndroidTun, Session
 android-app/app/src/main/java/com/shieldsvpn/vpn/   Kotlin: MainActivity, ShieldsVpnService, ProfileStore, SecretBox
 android-app/ui/src/       React screen; bridge.ts <-> UiJson.kt message contract
 android-app/native/       OpenSSL Android build scripts + PROVENANCE.md
@@ -135,7 +151,10 @@ Report what was and wasn't verified. The docs keep explicit "verified / not veri
   data crosses, never keys or paths.
 - Docs: Markdown is kept markdownlint-clean. Commit messages: short subject, bullet body explaining why, and the
   `Co-Authored-By` trailer.
-- Known stale fact: README says "63 tests"; the suite now has ~112 Python tests plus JVM and Vitest suites.
+- Known stale fact: README says "63 tests"; the suite now has ~137 Python tests plus JVM and Vitest suites.
+- App features (registration, ads, app sign-in, payments) are admin settings that default off; keep it that way.
+  `android-app/deploy.properties` (git-ignored) holds the portal URL, certificate pin and AdMob IDs; without it the
+  app behaves as before (ZIP import). Never leave an emulator `portalUrl=http://10.0.2.2...` file behind.
 
 ## Environment gotchas (this PC)
 

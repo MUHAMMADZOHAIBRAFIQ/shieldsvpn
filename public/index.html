@@ -12,7 +12,11 @@
   }
   *{box-sizing:border-box} html,body{margin:0}
   body{font:16px/1.65 "Segoe UI",system-ui,-apple-system,Roboto,sans-serif;color:var(--ink);
-    background:radial-gradient(1200px 600px at 70% -10%,#1e1b4b 0%,transparent 60%),linear-gradient(160deg,#0b1020,#0f172a);
+    background:
+      radial-gradient(900px 520px at 0% -5%,rgba(139,92,246,.30),transparent 62%),
+      radial-gradient(800px 480px at 100% 0%,rgba(14,165,233,.20),transparent 60%),
+      radial-gradient(1000px 500px at 50% 105%,rgba(79,70,229,.16),transparent 70%),
+      linear-gradient(180deg,#0b1020,#070a17);
     min-height:100vh;display:flex;flex-direction:column}
   a{color:inherit;text-decoration:none}
   .wrap{width:100%;max-width:1040px;margin:0 auto;padding:0 20px}
@@ -20,7 +24,7 @@
   .brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:20px}
   .brand .n{background:linear-gradient(90deg,#a5b4fc,#67e8f9);-webkit-background-clip:text;background-clip:text;color:transparent}
   .btn{display:inline-block;padding:11px 20px;border-radius:10px;font-weight:700;cursor:pointer;border:1px solid transparent}
-  .btn.primary{background:linear-gradient(90deg,var(--brand),#4f46e5);color:#fff;box-shadow:0 6px 20px rgba(79,70,229,.35)}
+  .btn.primary{background:linear-gradient(135deg,#8b5cf6,#6366f1 48%,#0ea5e9);color:#fff;box-shadow:0 8px 24px rgba(99,102,241,.38)}
   .btn.primary:hover{filter:brightness(1.08)}
   .btn.ghost{border-color:#334155;color:#cbd5e1}.btn.ghost:hover{background:#111a2e}
   main{flex:1}
@@ -42,6 +46,51 @@
   footer{border-top:1px solid var(--line);color:var(--muted);font-size:13px;text-align:center;padding:22px 0;margin-top:30px}
   .tech{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:10px}
   .tech span{background:#0e1830;border:1px solid var(--line);border-radius:8px;padding:4px 10px;font-size:12.5px;color:#9fb3d1}
+  .nav{display:flex;align-items:center;gap:18px}
+  .nav .link{color:#cbd5e1;font-weight:600;font-size:15px}.nav .link:hover{color:#fff}
+  @media (max-width:560px){.nav .link{display:none}}
+  /* Browser extension */
+  .ext{display:grid;grid-template-columns:1.15fr .85fr;gap:36px;align-items:center;margin:56px 0 40px;padding:32px;
+    border:1px solid var(--line);border-radius:24px;
+    background:linear-gradient(135deg,rgba(139,92,246,.12),rgba(14,165,233,.06)),rgba(17,26,46,.6)}
+  @media (max-width:820px){.ext{grid-template-columns:1fr;padding:24px}}
+  .ext h2{font-size:clamp(24px,3.6vw,34px);line-height:1.15;margin:0 0 12px;letter-spacing:-.01em}
+  .ext p{color:var(--muted);margin:0 0 20px}
+  .ext .pill{margin-bottom:16px}
+  .ext .pill svg{width:16px;height:16px;color:#c4b5fd}
+  .stores{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+  @media (max-width:560px){.stores{grid-template-columns:1fr}}
+  .store{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:14px 16px;border-radius:14px;border:1px solid #334155;
+    background:rgba(15,23,42,.7);transition:transform .15s ease,border-color .2s ease}
+  .store:hover{transform:translateY(-2px);border-color:#6366f1}
+  .store b{font-size:16px}
+  .store small{color:var(--muted);font-size:12.5px}
+  .store .cta{margin-top:8px;font-weight:700;font-size:14px;color:#c4b5fd}
+  .store.live{border-color:transparent;background:linear-gradient(135deg,#8b5cf6,#6366f1 48%,#0ea5e9);box-shadow:0 8px 24px rgba(99,102,241,.35)}
+  .store.live small,.store.live .cta{color:#eef2ff}
+  .store.soon{cursor:default}.store.soon:hover{transform:none;border-color:#334155}
+  .ext .note{text-align:left;margin-top:12px}
+  .ticks{list-style:none;padding:0;margin:18px 0 0;display:grid;gap:6px;color:#cbd5e1;font-size:14.5px}
+  .ticks li{display:flex;gap:10px;align-items:flex-start}
+  .ticks li::before{content:"✓";color:#34d399;font-weight:800}
+  /* A static picture of the extension's popup (not interactive). */
+  .demo{justify-self:center;width:100%;max-width:320px;border-radius:16px;overflow:hidden;border:1px solid #334155;
+    box-shadow:0 24px 60px rgba(2,6,23,.6);background:
+      radial-gradient(90% 60% at 0% 0%,rgba(139,92,246,.3),transparent 65%),
+      radial-gradient(80% 50% at 100% 0%,rgba(14,165,233,.2),transparent 60%),linear-gradient(180deg,#0b1020,#070a17)}
+  .demo__bar{display:flex;gap:6px;padding:9px 12px;background:#0e1424;border-bottom:1px solid var(--line)}
+  .demo__bar i{width:9px;height:9px;border-radius:50%;background:#334155}
+  .demo__head{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid rgba(148,163,184,.16);font-weight:700}
+  .demo__head svg{width:22px;height:22px}
+  .demo__head .n{background:linear-gradient(90deg,#c4b5fd,#67e8f9);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .demo__pill{margin-left:auto;padding:2px 10px;border-radius:999px;font-size:12px;background:rgba(34,197,94,.18);color:#22c55e}
+  .demo__body{padding:14px}
+  .demo__body h4{margin:0 0 2px;font-size:18px}
+  .demo__body p{margin:0 0 12px;color:var(--muted);font-size:13.5px}
+  .demo__body dl{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;margin:0 0 14px;font-size:13px}
+  .demo__body dt{color:var(--muted)}.demo__body dd{margin:0;text-align:right}
+  .demo__btn{padding:9px 12px;border-radius:10px;text-align:center;font-weight:700;color:#fff;
+    background:linear-gradient(135deg,#8b5cf6,#6366f1 48%,#0ea5e9)}
 </style>
 </head>
 <body>
@@ -55,7 +104,10 @@
       </svg>
       <span>Shields<span class="n">VPN</span></span>
     </div>
-    <a class="btn ghost" href="#get-started">Sign in</a>
+    <nav class="nav">
+      <a class="link" href="#extension">Browser extension</a>
+      <a class="btn ghost" href="#get-started">Sign in</a>
+    </nav>
   </header>
 
   <main>
@@ -98,6 +150,56 @@
       </div>
     </section>
 
+    <section class="ext" id="extension">
+      <div>
+        <div class="pill">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M10 3h4v3a2 2 0 1 0 4 0V3h3v7h-3a2 2 0 1 0 0 4h3v7h-7v-3a2 2 0 1 0-4 0v3H3v-7h3a2 2 0 1 0 0-4H3V3h7z"/></svg>
+          Browser extension
+        </div>
+        <h2>Your VPN, one click away in the browser</h2>
+        <p>See whether ShieldsVPN is protecting you and connect or disconnect from your browser's toolbar. The extension
+          works together with the ShieldsVPN app for Windows, which protects the whole PC — not only the browser.</p>
+        <div class="stores">
+          <a class="store soon" data-store="chrome" href="#extension">
+            <b>Google Chrome</b><small>also Brave and Opera</small><span class="cta">Coming soon</span>
+          </a>
+          <a class="store soon" data-store="edge" href="#extension">
+            <b>Microsoft Edge</b><small>Edge Add-ons</small><span class="cta">Coming soon</span>
+          </a>
+          <a class="store soon" data-store="firefox" href="#extension">
+            <b>Mozilla Firefox</b><small>Firefox Add-ons</small><span class="cta">Coming soon</span>
+          </a>
+        </div>
+        <p class="note" id="ext-note">Coming soon to the Chrome Web Store, Microsoft Edge Add-ons and Firefox Add-ons.
+          Requires the ShieldsVPN app for Windows.</p>
+        <ul class="ticks">
+          <li>One permission only: talking to the ShieldsVPN app on your PC</li>
+          <li>No access to the websites you visit</li>
+          <li>Collects no data</li>
+        </ul>
+      </div>
+      <div class="demo" aria-label="Picture of the ShieldsVPN extension" role="img">
+        <div class="demo__bar"><i></i><i></i><i></i></div>
+        <div class="demo__head">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <defs><linearGradient id="d" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs>
+            <path d="M12 2l8 3v6c0 5-3.5 8.5-8 11-4.5-2.5-8-6-8-11V5l8-3z" fill="url(#d)"/>
+          </svg>
+          <span>Shields<span class="n">VPN</span></span>
+          <span class="demo__pill">Connected</span>
+        </div>
+        <div class="demo__body">
+          <h4>Connected</h4>
+          <p>Post-quantum protection is on.</p>
+          <dl>
+            <dt>Server</dt><dd>shieldsvpn</dd>
+            <dt>Encryption</dt><dd>ML-KEM-768 + X25519</dd>
+          </dl>
+          <div class="demo__btn">Disconnect</div>
+        </div>
+      </div>
+    </section>
+
     <section id="get-started" style="text-align:center;padding:10px 0 20px">
       <h2 style="font-size:22px;margin:0 0 8px">Ready to connect?</h2>
       <p style="color:var(--muted);margin:0 0 18px">Sign in to the ShieldsVPN portal to download your profile.</p>
@@ -107,14 +209,6 @@
   </main>
 </div>
 <footer>© <span id="y"></span> ShieldsVPN · Post-quantum VPN</footer>
-<script>
-  document.getElementById('y').textContent = new Date().getFullYear();
-  // When the real portal is live, set PORTAL_URL to its address (e.g. "https://yourname.playit.gg:PORT/").
-  var PORTAL_URL = "";
-  if (PORTAL_URL) {
-    document.querySelectorAll('#signin,#signin2').forEach(function(a){ a.href = PORTAL_URL; a.target = "_blank"; a.rel = "noopener"; });
-    var n = document.getElementById('portal-note'); if (n) n.style.display = "none";
-  }
-</script>
+<script src="/site.js"></script>
 </body>
 </html>
