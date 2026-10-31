@@ -79,6 +79,17 @@ class AccountTest {
     }
 
     @Test
+    fun installIdIsAStableHashNeverTheRawId() {
+        val h = Portal.hashInstallId("9774d56d682e549c")
+        assertEquals(64, h.length)
+        assertTrue(h.matches(Regex("[0-9a-f]{64}")))
+        assertEquals(h, Portal.hashInstallId("9774d56d682e549c"))   // the same after a reinstall
+        assertFalse(h.contains("9774d56d682e549c"))
+        assertFalse(h == Portal.hashInstallId("9774d56d682e549d"))
+        assertEquals("", Portal.hashInstallId(""))                   // no id: the portal simply starts at zero
+    }
+
+    @Test
     fun nextAdCountsDownFromTheAnswer() {
         val a = AccountInfo.fromMe(JSONObject("""{"plan": "free", "next_reward_in": 10}"""), phoneNowSec = 500)
         assertEquals(10L, a.nextRewardSeconds(500))

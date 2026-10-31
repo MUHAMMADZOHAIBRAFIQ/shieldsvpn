@@ -309,8 +309,11 @@ def _install_enrolled(profile: dict, key_pem: str, dest_dir: str) -> dict:
     return {"summary": summary, "secrets": {"key_pem": key_pem, "psk": psk_b64}}
 
 
-def enroll_json(base_url: str, pin: str, allow_http: bool, dest_dir: str) -> str:
+def enroll_json(base_url: str, pin: str, allow_http: bool, dest_dir: str, install_id: str = "") -> str:
     """Register this phone with the portal: no account, starts on Free (portal/devices.py).
+
+    ``install_id``: the app's SHA-256 of Android's per-app phone ID (the same after a reinstall), so the portal can
+    give back Free time that was earned but not used; empty = none.
 
     Generates the device key here, sends only its public half, writes the public profile into ``dest_dir`` and
     returns {"ok": true, "summary", "secrets": {"key_pem", "psk"}, "token", "me"}; the caller seals secrets and
@@ -319,8 +322,10 @@ def enroll_json(base_url: str, pin: str, allow_http: bool, dest_dir: str) -> str
     from .account_client import DEFAULT_KEY_ALG, new_device_key
     try:
         key_pem, public_b64 = new_device_key(DEFAULT_KEY_ALG)
-        out = _portal(base_url, pin, allow_http).call("POST", "/api/v1/enroll", {
-            "platform": "android", "key_alg": DEFAULT_KEY_ALG, "public_key": public_b64})
+        body = {"platform": "android", "key_alg": DEFAULT_KEY_ALG, "public_key": public_b64}
+        if isinstance(install_id, str) and len(install_id) == 64 and all(c in "0123456789abcdef" for c in install_id):
+            body["install_id"] = install_id
+        out = _portal(base_url, pin, allow_http).call("POST", "/api/v1/enroll", body)
         token = out.get("token")
         if not isinstance(token, str) or not 20 <= len(token) <= 100 or not isinstance(out.get("profile"), dict):
             raise ProfileError("The server's answer is incomplete.")

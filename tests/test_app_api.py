@@ -56,11 +56,13 @@ class App:
         conn.close()
         return r.status, (json.loads(out) if out and r.headers.get("Content-Type") == "application/json" else out)
 
-    def enroll(self, platform: str = "android"):
+    def enroll(self, platform: str = "android", install_id: str | None = None):
         self.key = ML_DSA_65.generate()
-        st, data = self.call("POST", "/api/v1/enroll", {
-            "platform": platform, "key_alg": "ML-DSA-65",
-            "public_key": base64.b64encode(ML_DSA_65.public_bytes(self.key)).decode()})
+        body = {"platform": platform, "key_alg": "ML-DSA-65",
+                "public_key": base64.b64encode(ML_DSA_65.public_bytes(self.key)).decode()}
+        if install_id is not None:
+            body["install_id"] = install_id
+        st, data = self.call("POST", "/api/v1/enroll", body)
         if st == 200:
             self.token, self.profile = data["token"], data["profile"]
         return st, data
@@ -289,6 +291,42 @@ class TestAppApi(unittest.IsolatedAsyncioTestCase):
         other.enroll()
         st, data = other.call("POST", "/api/v1/reward/claim", {"nonce": nonce})
         self.assertEqual(st, 400)  # another device's nonce is useless
+
+    def test_reinstall_keeps_unused_free_time(self):
+        """Uninstall + install (or Clear storage) makes a new key; the same phone gets its unused time back."""
+        self.settings(admob_enabled=1, admob_require_ssv=0, free_minutes=30, free_daily_rewards=5)
+        phone = "c0ffee" * 10 + "abcd"  # the app's SHA-256 of its per-app Android ID
+        apps: list[App] = []
+        # Every test registers from 127.0.0.1, which has a daily registration limit: give these slots back.
+        self.addCleanup(lambda: [self.portal.store.delete_vpn_device(d["id"]) for a in apps
+                                 if (d := self.portal.store.vpn_device_by_subject(a.profile["subject"]))])
+        first = App(self.port)
+        apps.append(first)
+        first.enroll(install_id=phone)
+        _, data = first.call("POST", "/api/v1/reward/start", {"kind": "admob"})
+        self.assertEqual(first.call("POST", "/api/v1/reward/claim", {"nonce": data["nonce"]})[1]["free_seconds"], 1800)
+        old_subject = first.profile["subject"]
+
+        again = App(self.port)  # reinstalled: new key, new certificate, same phone
+        apps.append(again)
+        st, data = again.enroll(install_id=phone)
+        self.assertEqual(st, 200, data)
+        self.assertEqual(data["me"]["free_seconds"], 1800)  # the unused time is still there
+        self.assertEqual(data["me"]["rewards_left_today"], 4)  # and today's ad count with it
+        self.assertIsNone(self.portal.store.vpn_device_by_subject(old_subject))  # the dead registration is gone
+        self.assertEqual(first.call("GET", "/api/v1/me")[0], 401)
+        stored = self.portal.store.vpn_device_by_subject(again.profile["subject"])["install_hash"]
+        self.assertNotIn(phone, stored)  # only a keyed hash is kept
+        self.assertEqual(len(stored), 64)
+        self.assertIn("kept from a reinstall", self.portal.store.recent_audit(1)[0]["detail"])
+
+        other = App(self.port)  # another phone gets nothing
+        apps.append(other)
+        self.assertEqual(other.enroll(install_id="ab" * 32)[1]["me"]["free_seconds"], 0)
+        bad = App(self.port)  # a malformed id is ignored, not an error
+        apps.append(bad)
+        self.assertEqual(bad.enroll(install_id="not-a-hash")[1]["me"]["free_seconds"], 0)
+        self.assertIsNone(self.portal.store.vpn_device_by_subject(bad.profile["subject"])["install_hash"])
 
     def test_admob_server_side_verification(self):
         self.settings(admob_enabled=1)

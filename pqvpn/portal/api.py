@@ -150,10 +150,12 @@ def enroll(h, body: dict, _device_row, _url) -> None:
         raise DeviceError(404, "disabled", "app sign-up is not available")
     if not portal.allow_attempt(h.ip):
         raise DeviceError(429, "rate_limited", "too many requests from your network; wait a minute")
+    install = devices.install_hash(portal.vault.subkey("install-id"), body.get("install_id", ""))
     device, token, cert = devices.enroll(portal.cfg, portal.store, portal.ca, settings,
                                          _text(body, "platform", 16), _text(body, "key_alg", 32),
-                                         _text(body, "public_key", 8192), h.ip)
-    _audit(h, "device_enrolled", f"{device['platform']} {device['vpn_ip']}", device["subject"])
+                                         _text(body, "public_key", 8192), h.ip, install)
+    restored = f"; {device['free_seconds']} s of free time kept from a reinstall" if device["free_seconds"] else ""
+    _audit(h, "device_enrolled", f"{device['platform']} {device['vpn_ip']}{restored}", device["subject"])
     h._json(200, {"token": token, "profile": devices.bundle(portal.cfg, portal.ca, device, cert),
                   "me": _me(h, device, settings)})
 

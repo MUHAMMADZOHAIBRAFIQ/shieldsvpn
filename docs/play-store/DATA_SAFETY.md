@@ -21,7 +21,7 @@ in the form; they describe what the SDKs collect in their current versions.
 | **Personal info → Email address** | Collected, not shared | Optional (only for an account / Pro) | Account management, app functionality | Sign-up and sign-in in the app |
 | **Financial info → Purchase history** | Collected, not shared | Optional | App functionality (turning Pro on) | Google Play purchase token, plan, state and end date, checked by the portal |
 | **Location → Approximate location** | Collected; shared by the Mobile Ads SDK | Required | Fraud prevention, security (our portal keeps the IP address that registered a device and IPs in the security log); advertising (AdMob derives location from the IP address) | IP address |
-| **Device or other IDs** | Collected; the advertising ID is shared by the Mobile Ads SDK | Required | App functionality, fraud prevention (our random device name and device token); advertising, analytics (AdMob's advertising ID) | App registration; Mobile Ads SDK |
+| **Device or other IDs** | Collected; the advertising ID is shared by the Mobile Ads SDK | Required | App functionality, fraud prevention (our random device name and device token; a hash of Android's per-app ID, so a reinstalled app gets its unused free time back); advertising, analytics (AdMob's advertising ID) | App registration; Mobile Ads SDK |
 | **App activity → App interactions** | Collected and shared by the Mobile Ads SDK | Required on Free | Advertising, analytics, fraud prevention | Ad views and taps |
 | **App info and performance → Diagnostics** | Collected by the Mobile Ads SDK | Required on Free | Analytics, fraud prevention | SDK diagnostics |
 

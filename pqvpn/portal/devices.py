@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import os
 import re
 import secrets
@@ -36,6 +37,7 @@ from .store import Store
 
 DEVICE_PREFIX = "d-"
 SUBJECT_RE = re.compile(r"^d-[a-z2-7]{24}$")
+INSTALL_ID_RE = re.compile(r"^[0-9a-f]{64}$")  # the app's SHA-256 of its per-app phone ID, never the raw ID
 PLATFORMS = ("android", "windows")
 REWARD_KINDS = ("admob", "web")
 RENEW_BEFORE = 15 * 86400  # apps renew their certificate when less than this is left
@@ -124,9 +126,20 @@ def _issue(cfg: PortalConfig, store: Store, ca, device: dict, public_key: bytes)
     return cert
 
 
+def install_hash(secret: bytes, install_id: str) -> str | None:
+    """What the portal keeps of an app's install ID: a keyed hash, so the stored value is useless elsewhere."""
+    if not isinstance(install_id, str) or not INSTALL_ID_RE.match(install_id):
+        return None
+    return hmac.new(secret, install_id.encode("ascii"), hashlib.sha256).hexdigest()
+
+
 def enroll(cfg: PortalConfig, store: Store, ca, settings: dict, platform: str, key_alg: str, public_key_b64: str,
-           ip: str) -> tuple[dict, str, pki.Certificate]:
-    """Create an anonymous Free device; return (device row, bearer token, certificate)."""
+           ip: str, install: str | None = None) -> tuple[dict, str, pki.Certificate]:
+    """Create an anonymous Free device; return (device row, bearer token, certificate).
+
+    ``install`` (install_hash) identifies the phone across reinstalls: the unused Free time of its earlier
+    registrations moves to this one, so time that was earned but not used is never lost by reinstalling.
+    """
     if not enabled(settings, "app_enrollment"):
         raise DeviceError(404, "disabled", "app sign-up is not available")
     if platform not in PLATFORMS:
@@ -145,6 +158,8 @@ def enroll(cfg: PortalConfig, store: Store, ca, settings: dict, platform: str, k
     except Exception:
         store.delete_vpn_device(device["id"])
         raise
+    if install:
+        store.adopt_install(device["id"], install, platform)
     return store.vpn_device(device["id"]), token, cert
 
 

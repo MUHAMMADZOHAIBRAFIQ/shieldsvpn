@@ -1,9 +1,11 @@
 package com.shieldsvpn.vpn
 
 import android.content.Context
+import android.provider.Settings
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.security.MessageDigest
 
 class PortalException(val code: String, message: String, val status: Int = 0) : Exception(message)
 
@@ -131,6 +133,20 @@ data class AccountInfo(
 object Portal {
     val configured: Boolean get() = BuildConfig.PORTAL_URL.isNotBlank()
 
+    /**
+     * Android's per-app phone ID (ANDROID_ID: the same after a reinstall of this app, new after a factory reset),
+     * hashed: the portal gives a reinstalled app back the Free time it had earned but not used.  The raw ID
+     * never leaves the phone, and the portal stores only a keyed hash of this one.
+     */
+    fun installId(ctx: Context): String =
+        hashInstallId(Settings.Secure.getString(ctx.contentResolver, Settings.Secure.ANDROID_ID).orEmpty())
+
+    fun hashInstallId(androidId: String): String {
+        if (androidId.isBlank()) return ""
+        return MessageDigest.getInstance("SHA-256").digest("shieldsvpn-install/$androidId".toByteArray())
+            .joinToString("") { "%02x".format(it) }
+    }
+
     private fun result(raw: String): JSONObject {
         val o = JSONObject(raw)
         if (!o.optBoolean("ok")) {
@@ -146,7 +162,7 @@ object Portal {
         try {
             val raw = PythonRuntime.androidClient(ctx).callAttr(
                 "enroll_json", BuildConfig.PORTAL_URL, BuildConfig.PORTAL_PIN, BuildConfig.PORTAL_ALLOW_HTTP,
-                staging.absolutePath,
+                staging.absolutePath, installId(ctx),
             ).toString()
             val o = result(raw)
             val summary = ProfileStore.installEnrolled(ctx, staging, o, o.getString("token"))

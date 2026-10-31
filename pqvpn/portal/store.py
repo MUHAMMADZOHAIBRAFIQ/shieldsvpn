@@ -115,7 +115,8 @@ CREATE TABLE IF NOT EXISTS vpn_devices (
     created_at INTEGER NOT NULL,
     last_seen INTEGER NOT NULL,
     enroll_ip TEXT,
-    free_seconds INTEGER NOT NULL DEFAULT 0  -- Free time left; used up only while connected (access.py)
+    free_seconds INTEGER NOT NULL DEFAULT 0,  -- Free time left; used up only while connected (access.py)
+    install_hash TEXT  -- keyed hash of the app's per-install phone ID: a reinstall gets the unused time back
 );
 -- One row per "watch an ad for free time" attempt.  The nonce is stored hashed; granted_at is set once
 -- (single use) and provider_ref (the ad network's transaction id) is unique, so a replayed callback grants nothing.
@@ -178,6 +179,7 @@ CREATE INDEX IF NOT EXISTS password_resets_user ON password_resets (user_id, cre
 CREATE INDEX IF NOT EXISTS devices_user ON devices (user_id, last_used);
 CREATE INDEX IF NOT EXISTS vpn_devices_user ON vpn_devices (user_id);
 CREATE INDEX IF NOT EXISTS vpn_devices_enroll ON vpn_devices (enroll_ip, created_at);
+CREATE INDEX IF NOT EXISTS vpn_devices_install ON vpn_devices (install_hash);
 CREATE INDEX IF NOT EXISTS reward_grants_device ON reward_grants (device_id, granted_at);
 CREATE INDEX IF NOT EXISTS play_purchases_due ON play_purchases (replaced, expires);
 """
@@ -198,7 +200,10 @@ class Store:
                     db.execute(f"ALTER TABLE users ADD COLUMN {name} {definition}")
             if "last_rx" not in {r["name"] for r in db.execute("PRAGMA table_info(peers)")}:
                 db.execute("ALTER TABLE peers ADD COLUMN last_rx INTEGER")
-            if "free_seconds" not in {r["name"] for r in db.execute("PRAGMA table_info(vpn_devices)")}:
+            device_cols = {r["name"] for r in db.execute("PRAGMA table_info(vpn_devices)")}
+            if "install_hash" not in device_cols:
+                db.execute("ALTER TABLE vpn_devices ADD COLUMN install_hash TEXT")
+            if "free_seconds" not in device_cols:
                 db.execute("ALTER TABLE vpn_devices ADD COLUMN free_seconds INTEGER NOT NULL DEFAULT 0")
                 # Free time used to be an end time on the wall clock; whatever was left becomes the balance.
                 db.execute("UPDATE vpn_devices SET free_seconds = MAX(0, free_until - ?)", (int(time.time()),))
@@ -407,6 +412,29 @@ class Store:
         with self._db() as db:
             db.execute("UPDATE vpn_devices SET free_seconds = free_seconds + ? WHERE id = ?", (seconds, device_id))
             return db.execute("SELECT free_seconds FROM vpn_devices WHERE id = ?", (device_id,)).fetchone()[0]
+
+    def adopt_install(self, device_id: int, install_hash: str, platform: str) -> int:
+        """The same phone registered again (the app was reinstalled or its data cleared): move the unused Free time
+        and today's ad count of its earlier registrations to ``device_id`` and forget those.  Account sign-ins are
+        not carried over (the person signs in again).  Returns the seconds carried over."""
+        with self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                old = db.execute("SELECT id, free_seconds FROM vpn_devices WHERE install_hash = ? AND platform = ?"
+                                 " AND id != ?", (install_hash, platform, device_id)).fetchall()
+                carried = sum(max(0, r["free_seconds"]) for r in old)
+                ids = [r["id"] for r in old]
+                if ids:
+                    marks = ",".join("?" * len(ids))
+                    db.execute(f"UPDATE reward_grants SET device_id = ? WHERE device_id IN ({marks})", (device_id, *ids))
+                    db.execute(f"DELETE FROM vpn_devices WHERE id IN ({marks})", ids)
+                db.execute("UPDATE vpn_devices SET install_hash = ?, free_seconds = free_seconds + ? WHERE id = ?",
+                           (install_hash, carried, device_id))
+                db.execute("COMMIT")
+            except BaseException:
+                db.execute("ROLLBACK")
+                raise
+        return carried
 
     def charge_free_seconds(self, charges: list[tuple[str, int]]) -> None:
         """Use up Free time of connected devices: [(subject, seconds)], never below zero (one transaction)."""

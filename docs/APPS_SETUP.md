@@ -146,6 +146,8 @@ The first command registers the PC and creates the Desktop/Start-menu shortcut. 
    *Watch an ad* is greyed out while connected.
 6. Watch an ad, then another as soon as *Next ad in … s* turns back into *Watch an ad* (10 s by default,
    *Seconds between two ads for free time*): the minutes add up without connecting.
+7. Close the app completely, or uninstall and reinstall it: the unused free time is still there (a reinstall gets
+   it back through a hash of Android's per-app ID).
 5. ☰ menu → *Sign up for Pro* → create an account → enter the emailed code → the plan sheet opens.
 6. Go Pro → pay in the sandbox → back in the app the card shows **ShieldsVPN Pro**; Connect works with no ads.
 7. Windows: *Get free time* → wait on the ad page → press its button → the window shows the minutes.
@@ -201,7 +203,8 @@ Verified:
   on connect and disconnect): after the test rewarded ad the balance fell 60 → 56 → 50 → 42 while connected; the
   tap on Disconnect showed an interstitial and the balance stayed at 42 for 25 s although the server still listed
   the session; the app showed *Paused* 00:00:42 and *Watch an ad* again; an ad watched while disconnected made it
-  102. Later the same day: two ads in a row while disconnected, 10 s apart (the button counted down *Next ad
+  102. Reopening after a full close kept 60 s; uninstall + reinstall gave the new registration the same 60 s and
+  removed the old one; an update in place kept the same registration. Later the same day: two ads in a row while disconnected, 10 s apart (the button counted down *Next ad
   in 9 s*), made the balance 60 then 120. The first try had charged time after Disconnect (billing up to "now"); charging now stops at the last
   packet, with tests for it.
 - 2026-10-31, admin console (headless Chrome against a throwaway portal, real form posts): after sign-in /admin
