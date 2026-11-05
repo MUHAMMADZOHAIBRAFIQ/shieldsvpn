@@ -32,5 +32,9 @@ cookie_threshold = 64
 handshake_rate_per_ip = 5                       # per IPv4 address / IPv6 /64, applied under load
 log_peer_addresses = false                      # true writes clients' public IP:port into the log (see privacy policy)
 
+[stealth]
+# key_file = "obfs.key"                         # stealth mode: obfuscate traffic (DPI resistance); `pqvpn genobfs`
+                                                # the same key must be in every client profile; pair it with listen on 443
+
 # [portal]
 # database = "/var/lib/pqvpn/portal.db"         # secret-bearing database: enables account-based access control

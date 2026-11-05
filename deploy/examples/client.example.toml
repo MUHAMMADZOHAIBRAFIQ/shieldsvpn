@@ -21,3 +21,6 @@ peer_signature_algorithms = ["ML-DSA-65", "ML-DSA-87"]
 ca_signature_algorithms = ["SLH-DSA-SHA2-192s"]
 rekey_interval = 120
 # psk_file = "psk.key"                          # secret: only if the server uses a PSK
+
+[stealth]
+# key_file = "obfs.key"                         # stealth mode: obfuscate traffic; must match the server's key

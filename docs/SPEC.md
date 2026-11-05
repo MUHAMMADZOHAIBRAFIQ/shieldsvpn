@@ -125,6 +125,7 @@ errors.** Secrets are referenced by path, never inlined. Templates: `deploy/exam
 | `[security] revoked_serials` | `[]` | lower-case hex |
 | `max_peers` / `cookie_threshold` / `always_require_cookie` / `handshake_rate_per_ip` | 1024 / 64 / false / 5 | the rate counts per IPv4 address / IPv6 /64 |
 | `log_peer_addresses` | false | true: clients' public IP:port appear in the log (connects, roaming, rejected handshakes) |
+| `[stealth] key_file` | none | stealth mode: obfuscate every datagram under this key (PROTOCOL.md §8) |
 | `[portal] database` | none | enables account-based access control |
 | `[portal] url` | `""` | pushed to clients ("Open portal") |
 
@@ -133,7 +134,7 @@ errors.** Secrets are referenced by path, never inlined. Templates: `deploy/exam
 `[client]` `server` (host:port, re-resolved on reconnect), `server_name`, `certificate`, `private_key`, `ca`,
 `portal_url`, `private_key_passphrase_file`. `[tunnel]` `interface`, `mtu`, `full_tunnel` (false), `routes` (empty =
 use pushed), `use_server_dns` (true), `dns`, `persistent_keepalive` (25). `[crypto]` as for the server.
-`[security] revoked_serials`.
+`[security] revoked_serials`. `[stealth] key_file` (stealth mode, must match the server's; PROTOCOL.md §8).
 
 ### 5.3 `portal.toml`
 
@@ -151,6 +152,7 @@ use pushed), `use_server_dns` (true), `dns`, `persistent_keepalive` (25). `[cryp
 | `reserved_addresses` | `[]` | never allocated (e.g. the server's tunnel IP) |
 | `ca_certificate`, `ca_private_key`, `ca_passphrase_file` | | the portal signs client certificates |
 | `psk_file` | none | copied into profiles |
+| `obfuscation_key_file` | none | stealth mode: the obfuscation key copied into every issued profile (PROTOCOL.md §8) |
 | `client_algorithm` / `certificate_days` | ML-DSA-65 / 90 | |
 | `suites` | defaults | written into profiles |
 | `portal_url_in_vpn` | `""` | portal URL as seen through the tunnel |
