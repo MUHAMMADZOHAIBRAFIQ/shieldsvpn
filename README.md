@@ -108,7 +108,7 @@ sudo python3 -m pqvpn portal -c /var/lib/pqvpn/portal.toml     # http://127.0.0.
 - per-IP rate limiting and account lockout
 - strict CSP and security headers, and a full audit log
 
-**Who can sign in:** by default **only administrators**. Everyone else is a VPN-only account: an admin downloads their profile with *New profile* and hands it over. To give someone portal access, set their role to Administrator. To let users also sign in for self-service, choose *All users* under **Settings → Portal access**.
+**Who can sign in:** by default **only administrators**. Everyone else is a VPN-only account: an admin downloads their profile with *Download profile (.zip)* and hands it over. To give someone portal access, set their role to Administrator. To let users also sign in for self-service, choose *All users* under **Settings → Portal access**.
 
 **What users can do (only with *All users*):** sign in with their username or email address, see their live VPN status and plan, and download their profile. Every download creates a fresh ML-DSA key; the previous profile stops working and private keys are never stored. They can set a recovery email and use **Forgot password?** on the sign-in page to reset their password with a 6-digit code sent by email.
 
@@ -118,7 +118,7 @@ sudo python3 -m pqvpn portal -c /var/lib/pqvpn/portal.toml     # http://127.0.0.
 - totals for users and Premium
 - whether email and portal access are set up
 - quick actions and recent activity
-- a searchable user table where every row has Edit, Disable/Enable, Unlock, Reset password, New profile and Delete
+- a searchable user table where every row has Edit, Disable/Enable, Unlock, Reset password, Download profile (.zip) and Delete
 
 From there admins can:
 
@@ -215,7 +215,7 @@ These figures come from the development machine (single core, both endpoints on 
 ## Tests
 
 ```bash
-python -m unittest discover -s tests -v      # 112 tests (some skipped on Windows), ~1 min
+python -m unittest discover -s tests -v      # ~190 tests (some skipped on Windows), ~3 min
 python -m pqvpn selftest                     # all four suites end to end
 ```
 

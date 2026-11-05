@@ -1433,8 +1433,8 @@ def do_admin_create(h: Handler) -> None:
     store.update_user(uid, email=email or None, plan=plan)
     h._audit("user_created", f"user={username} role={role} plan={plan} ip={ip}")
     if not h.portal.may_sign_in(store.user(uid)):
-        return page_admin_dashboard(h, notice=f"VPN user <strong>{e(username)}</strong> created ({e(ip)}). Click <em>New "
-                                    "profile</em> next to them to download their VPN profile.")
+        return page_admin_dashboard(h, notice=f"VPN user <strong>{e(username)}</strong> created ({e(ip)}). Click <em>Download "
+                                    "profile (.zip)</em> next to them to download their VPN profile.")
     page_admin_dashboard(h, notice=_temp_password_notice(username, password))
 
 

@@ -284,8 +284,9 @@ class Store:
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
             # The account's app devices become anonymous Free devices with no time left (ON DELETE SET NULL),
-            # so deleting someone still ends their VPN access within one status interval.
-            db.execute("UPDATE vpn_devices SET free_until = 0 WHERE user_id = ?", (user_id,))
+            # so deleting someone still ends their VPN access within one status interval.  free_seconds is the
+            # balance the VPN server checks; free_until is the pre-2026-10-31 column, cleared for old app builds.
+            db.execute("UPDATE vpn_devices SET free_seconds = 0, free_until = 0 WHERE user_id = ?", (user_id,))
             db.execute("INSERT INTO meta (key, value) VALUES ('users_id_floor', ?) ON CONFLICT(key) DO UPDATE SET"
                        " value = CAST(MAX(CAST(meta.value AS INTEGER), CAST(excluded.value AS INTEGER)) AS TEXT)",
                        (str(user_id),))  # see create_user: this id is never handed out again

@@ -76,6 +76,11 @@ class ShieldsVpnService : VpnService() {
      * honest stop instead of an endless "Reconnecting".
      */
     private var freeTimeEnded = false
+    /**
+     * When the Free time of the requested connection ends (wall-clock ms; 0 = no limit).  Kept so that a Connect
+     * queued behind a closing session (pendingConnect) still gets its timer: finishSession() cancels the old one.
+     */
+    private var stopAtMs = 0L
     private val freeTimeUp = Runnable {
         if (worker != null && !stopRequested) {
             Log.i(TAG, "free time is over; disconnecting")
@@ -97,11 +102,17 @@ class ShieldsVpnService : VpnService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_CONNECT -> {
+                stopAtMs = intent.getLongExtra(EXTRA_STOP_AT, 0)
                 startSession()
-                if (worker != null) scheduleFreeTime(intent.getLongExtra(EXTRA_STOP_AT, 0))
+                if (worker != null) scheduleFreeTime(stopAtMs)
             }
             ACTION_FREE_TIME -> {
-                if (worker != null) scheduleFreeTime(intent.getLongExtra(EXTRA_STOP_AT, 0)) else stopSelf()
+                if (worker != null) {
+                    stopAtMs = intent.getLongExtra(EXTRA_STOP_AT, 0)
+                    scheduleFreeTime(stopAtMs)
+                } else {
+                    stopSelf()
+                }
             }
             ACTION_DISCONNECT -> requestStop()
             // Android's always-on VPN starts the service with the VpnService interface action (at boot, after
@@ -109,6 +120,7 @@ class ShieldsVpnService : VpnService() {
             // report it -- with "Block connections without VPN" Android then keeps all traffic blocked.
             SERVICE_INTERFACE -> {
                 Log.i(TAG, "started by Android always-on VPN")
+                stopAtMs = 0L   // no app screen asked: the VPN server alone enforces Free time here
                 startSession()
             }
             else -> if (worker == null) stopSelf()   // e.g. a restart by the system: never connect silently
@@ -213,6 +225,8 @@ class ShieldsVpnService : VpnService() {
         if (pendingConnect) {
             Log.i(TAG, "previous session closed; starting the queued connection")
             startSession()
+            // The old session's timer was cancelled above; the queued connection keeps its own Free-time limit.
+            if (worker != null) scheduleFreeTime(stopAtMs)
             return
         }
         if (freeTimeEnded) {

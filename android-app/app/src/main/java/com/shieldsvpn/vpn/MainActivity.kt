@@ -77,6 +77,11 @@ class MainActivity : AppCompatActivity() {
     /** Free / Pro status from the portal (null = not known yet, or this build has no portal). */
     private var account: AccountInfo? = null
     private var accountBusy = false
+    /**
+     * A certificate renewal is queued or running.  /me answers fetched before it finishes still say "renew"; without
+     * this guard each of them queued another renewal, which the portal refuses (409 not_due) once the first is done.
+     */
+    private var renewing = false
     /** Registration with the portal is running, and whether the user tapped Connect meanwhile. */
     private var enrolling = false
     private var connectAfterEnroll = false
@@ -445,7 +450,7 @@ class MainActivity : AppCompatActivity() {
         account = a
         pushAccount()
         if (VpnStateStore.state.active) ShieldsVpnService.updateFreeTime(this, a.stopAtMs(System.currentTimeMillis()))
-        if (a.renewCertificate && !VpnStateStore.state.active) renewCertificate()
+        if (a.renewCertificate && !VpnStateStore.state.active && !renewing) renewCertificate()
         if (BuildConfig.PLAY_STORE && a.play) startPlay(a)
     }
 
@@ -509,9 +514,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun renewCertificate() {
+        renewing = true
         io.execute {
             val outcome = runCatching { Portal.renew(applicationContext) }
             main.post {
+                renewing = false   // a failure (e.g. offline) is retried at the next /me answer that says "renew"
                 outcome.onSuccess { profile = it; pushState() }
                     .onFailure { Log.w(TAG, "certificate renewal failed: ${Redact.text(it.message)}") }
             }

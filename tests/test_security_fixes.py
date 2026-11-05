@@ -139,6 +139,29 @@ class TestPortalFixes(unittest.TestCase):
         self.assertEqual(st, 200, me)
         self.assertIsNone(self.portal.store.user_by_email("leaves-later@example.com"))
 
+    def test_a_deleted_accounts_devices_keep_no_free_time(self):
+        # Free time once was an end time (free_until); deletion kept clearing that column after the balance moved to
+        # free_seconds, so a deleted account's phones kept their banked minutes and could still connect.
+        store = self.portal.store
+        phone = self.signed_in_app("banked-time@example.com")
+        device = store.vpn_device_by_token(phone.token)
+        store.add_free_seconds(device["id"], 1800)
+        self.assertTrue(devices.decide(store, store.vpn_device(device["id"]), time.time()).allowed)
+        st, me = phone.call("POST", "/api/v1/account/delete", {"password": PASSWORD})
+        self.assertEqual(st, 200, me)
+        self.assertEqual((me["account"], me["free_seconds"], me["can_connect"]), (None, 0, False))
+        decision = devices.decide(store, store.vpn_device(device["id"]), time.time())
+        self.assertFalse(decision.allowed)
+        self.assertIn("free time used up", decision.reason)
+
+        # The same for an administrator deleting the account in the portal (web.py calls Store.delete_user too).
+        other = self.signed_in_app("deleted-by-admin@example.com")
+        other_device = store.vpn_device_by_token(other.token)
+        store.add_free_seconds(other_device["id"], 600)
+        store.delete_user(store.user_by_email("deleted-by-admin@example.com")["id"])
+        self.assertEqual(store.vpn_device(other_device["id"])["free_seconds"], 0)
+        self.assertFalse(other.me()["can_connect"])
+
     def test_verifying_an_email_does_not_re_enable_a_disabled_account(self):
         probe = App(self.port)
         probe.enroll()

@@ -88,7 +88,7 @@ npm run build      # typecheck + bundle into app/build/generated/ui-assets/ui
 
 ## Provisioning and credential storage
 
-The app uses the profile ZIP the portal already issues (**Download VPN profile**, or an admin's **New profile** button). No new server endpoint is needed.
+The app uses the profile ZIP the portal already issues (**Download VPN profile**, or an admin's **Download profile (.zip)** button). No new server endpoint is needed.
 
 1. Download the profile ZIP from the portal on the phone, or copy it there.
 2. In the app, tap **Import profile** (or the power button when no profile is installed) and choose the ZIP.

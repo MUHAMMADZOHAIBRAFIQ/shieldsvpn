@@ -23,7 +23,7 @@ Never rename them: live deployments, imports and certificate subjects depend on 
 ```bash
 python -m pqvpn selftest                          # handshake + traffic for every suite (needs OpenSSL >= 3.5)
 python -m pqvpn algorithms                        # shows which OpenSSL was loaded
-python -m unittest discover -s tests -v           # all Python tests (~137, ~1.5 min); pytest -q also works
+python -m unittest discover -s tests -v           # all Python tests (~190, ~3 min); pytest -q also works
 python tools/secret_scan.py                       # must report 0 findings before any commit
 python tools/secret_scan.py <file.apk>            # before publishing an APK
 
@@ -152,7 +152,6 @@ Report what was and wasn't verified. The docs keep explicit "verified / not veri
   data crosses, never keys or paths.
 - Docs: Markdown is kept markdownlint-clean. Commit messages: short subject, bullet body explaining why, and the
   `Co-Authored-By` trailer.
-- Known stale fact: README says "63 tests"; the suite now has ~137 Python tests plus JVM and Vitest suites.
 - App features (registration, ads, app sign-in, payments) are admin settings that default off; keep it that way.
   `android-app/deploy.properties` (git-ignored) holds the portal URL, certificate pin and AdMob IDs; without it the
   app behaves as before (ZIP import). Never leave an emulator `portalUrl=http://10.0.2.2...` file behind.
