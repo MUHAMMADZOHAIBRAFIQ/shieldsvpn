@@ -84,6 +84,11 @@ class BaseNode(asyncio.DatagramProtocol):
         self.reasm = Reassembler()
         self._tick_handle: asyncio.TimerHandle | None = None
         self.closed = asyncio.Event()
+        self._obfs = None  # stealth mode: an obfs.Obfuscator wrapping every datagram, or None (obfs.py)
+
+    def set_obfuscator(self, obfuscator) -> None:
+        """Turn on the stealth obfuscation layer (set before any datagram is sent or received)."""
+        self._obfs = obfuscator
 
     # -------------------------------------------------------------- asyncio glue
     def connection_made(self, transport) -> None:
@@ -100,6 +105,10 @@ class BaseNode(asyncio.DatagramProtocol):
             addr = _norm_addr(addr)
             if not data:
                 return
+            if self._obfs is not None:
+                data = self._obfs.unwrap(data)  # None: not sealed with our key (or a probe) -> drop, no reply
+                if not data:
+                    return
             if data[0] == PT_DATA:
                 self.on_data(data, addr)
             elif data[0] == PT_HANDSHAKE:
@@ -146,10 +155,14 @@ class BaseNode(asyncio.DatagramProtocol):
         self.closed.set()
 
     # -------------------------------------------------------------- data plane
+    def _emit(self, datagram: bytes, addr) -> None:
+        """Send one datagram, obfuscated first in stealth mode.  The single point every datagram leaves through."""
+        if self.transport is not None:
+            self.transport.sendto(self._obfs.wrap(datagram) if self._obfs is not None else datagram, addr)
+
     def send_raw(self, datagrams: list[bytes], addr) -> None:
-        if self.transport:
-            for d in datagrams:
-                self.transport.sendto(d, addr)
+        for d in datagrams:
+            self._emit(d, addr)
 
     def on_data(self, data: bytes, addr) -> None:
         if len(data) < HEADER_LEN + TAG_LEN:
@@ -193,7 +206,7 @@ class BaseNode(asyncio.DatagramProtocol):
         dgram = kp.encrypt(pad(pkt, self.mtu) if pkt else b"")
         if dgram is None:
             return False
-        self.transport.sendto(dgram, peer.endpoint)
+        self._emit(dgram, peer.endpoint)
         peer.last_tx = now
         peer.ack_due = None
         if pkt:

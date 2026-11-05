@@ -148,7 +148,11 @@ class DesktopAccount:
             psk = str(profile.get("psk") or "")
             if psk:
                 _write_private(os.path.join(staging, "psk.key"), psk.encode("ascii") + b"\n")
-            write_profile(profile, key_pem, staging, key_file="device.key", psk_file="psk.key" if psk else None)
+            obfs = str(profile.get("obfuscation_key") or "")
+            if obfs:  # stealth key (semi-public, but kept 0600 like the rest of the device folder)
+                _write_private(os.path.join(staging, "obfs.key"), obfs.encode("ascii") + b"\n")
+            write_profile(profile, key_pem, staging, key_file="device.key", psk_file="psk.key" if psk else None,
+                          obfs_file="obfs.key" if obfs else None)
             state = {**state, "key_passphrase": seal(passphrase), "subject": profile.get("subject", "")}
             _write_private(os.path.join(staging, ACCOUNT_FILE), json.dumps(state, indent=2).encode())
             old = self.dir + ".old"

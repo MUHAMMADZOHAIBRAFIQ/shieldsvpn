@@ -189,3 +189,63 @@ Each peer has a `current`, `previous` and `next` slot. The initiator installs a 
 **Roaming:** the responder updates a peer's endpoint only on an authenticated packet that carries the highest counter seen on the current keypair. A replayed (old) packet therefore cannot redirect traffic.
 
 **Cryptokey routing:** outbound packets go to the peer whose certificate addresses longest-prefix-match the destination. Inbound packets are accepted only if their source address routes back to the same peer.
+
+## 8. Obfuscation layer (stealth mode) — version 1
+
+Optional and off by default. When a server and its clients share an **obfuscation key**, every UDP datagram is
+wrapped in an outer layer before it is sent and unwrapped after it is received. **The inner protocol (sections 1–7)
+is byte-for-byte unchanged**; this is a separable encapsulation, selected by configuration, not an inner-protocol
+change. A node either runs with obfuscation (its whole listener is obfuscated) or without; the two do not mix on one
+socket.
+
+### 8.1 Why
+
+Without it, the inner protocol is trivial to fingerprint: the first byte is a fixed packet type (`0x01`/`0x04`), the
+data counter is in clear, handshake datagrams are a fixed 1216 bytes, and the UDP port is fixed. A DPI box matches
+any of these. The obfuscation layer removes every fixed field and fixed length from the wire and makes the port
+silent to unauthenticated probes.
+
+### 8.2 Wire format
+
+```text
+wire = nonce[12] || AEAD(k_obfs, nonce, aad="", plaintext)
+plaintext = u16 inner_len | inner_datagram | random_pad
+```
+
+* `AEAD` is ChaCha20-Poly1305 (constant-time in software). `k_obfs = HKDF(SHA-256, obfuscation secret, "pqvpn obfs
+  v1 key", 32)`.
+* `nonce` is 12 fresh random bytes per datagram, sent in clear (it is indistinguishable from random, which is the
+  point). Random nonces mean the layer must be treated as having a birthday bound; a `(k_obfs, nonce)` repeat only
+  weakens *this* layer's obfuscation/integrity, never the inner session, which has its own keys and counters.
+  Rotate the obfuscation key to reset it.
+* `random_pad` is 0–`pad_max` (default 64) bytes, capped so an obfuscated datagram never exceeds 1280 bytes (the
+  IPv6 minimum MTU): a 1216-byte handshake fragment becomes ≤ 1280 on the wire. Larger inner datagrams (data
+  packets) are not padded — the data path already pads the inner IP packet. Stealth adds ≤ 30 bytes of overhead, so
+  set the tunnel MTU about 30 lower than normal.
+* A receiver drops, with no reply, any datagram shorter than 30 bytes or whose tag does not authenticate under
+  `k_obfs`. So an active prober that does not hold the key gets silence: the port looks closed.
+
+### 8.3 Key distribution and honest limits
+
+The obfuscation key is shared in the server config and in every client profile, exactly like the PSK. **It is not a
+secret that authenticates anyone**: on a public VPN, anyone who installs the app can read it, so a determined censor
+can too. What it buys:
+
+* The flow is no longer caught by generic rules ("block unknown UDP", "block this known-VPN fingerprint"): it is
+  short random nonces followed by random-looking ciphertext, on whatever port you choose (UDP 443 recommended).
+* A censor must identify and target ShieldsVPN specifically, and cannot confirm the server by probing the port.
+
+It does **not**:
+
+* defend against the data-centre IP range being blocked wholesale (the strongest censors do this; beating it needs
+  CDN/residential fronting, out of scope here);
+* hide traffic timing, direction or volume;
+* survive a censor who extracts the key and writes a ShieldsVPN-specific detector. A looks-like-TLS-on-443 transport
+  (obfs v2, not yet built) would raise that bar.
+
+### 8.4 Configuration
+
+`[stealth] key_file = "obfs.key"` (base64, from `pqvpn genobfs`) on the server and in each client profile; set
+`enabled = false` to keep the key but turn it off. `pqvpn quickstart --stealth` generates a matching set. There is
+no in-band negotiation — a plaintext "use stealth" byte would itself be a fingerprint — so a stealth client only
+talks to a stealth server and vice versa.

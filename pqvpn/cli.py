@@ -129,6 +129,11 @@ def cmd_genpsk(args) -> int:
     return 0
 
 
+def cmd_genobfs(args) -> int:
+    print(base64.b64encode(os.urandom(32)).decode())
+    return 0
+
+
 SERVER_TOML = """\
 # pqvpn server configuration
 [server]
@@ -157,7 +162,11 @@ max_peers = 1024
 cookie_threshold = 64
 handshake_rate_per_ip = 5
 log_peer_addresses = false   # true writes clients' public IP:port into the log
-"""
+
+[stealth]
+# Obfuscation layer (stealth mode): makes the traffic hard to fingerprint in censored networks. The same key
+# must be in every client profile. Pair it with listen on UDP 443. See docs/PROTOCOL.md section 8.
+{stealth_cfg}"""
 
 CLIENT_TOML = """\
 # pqvpn client configuration for {name}
@@ -181,7 +190,9 @@ suites = {suites}
 peer_signature_algorithms = ["ML-DSA-65", "ML-DSA-87"]
 ca_signature_algorithms = ["{ca_alg}"]
 rekey_interval = 120
-{psk_line}"""
+{psk_line}
+[stealth]
+{stealth_cfg}"""
 
 
 def cmd_quickstart(args) -> int:
@@ -209,10 +220,18 @@ def cmd_quickstart(args) -> int:
         psk = base64.b64encode(os.urandom(32)).decode()
         psk_line = 'psk_file = "psk.key"\n'
 
+    obfs_key = None
+    stealth_cfg = '# key_file = "obfs.key"   # set to turn stealth mode on (run `pqvpn genobfs`)\n'
+    if args.stealth:
+        obfs_key = base64.b64encode(os.urandom(32)).decode()
+        stealth_cfg = 'key_file = "obfs.key"\n'
+
     def bundle(d: str) -> None:
         shutil.copyfile(os.path.join(ca_dir, "ca.crt"), os.path.join(d, "ca.crt"))
         if psk:
             pki.write_file(os.path.join(d, "psk.key"), psk + "\n")
+        if obfs_key:
+            pki.write_file(os.path.join(d, "obfs.key"), obfs_key + "\n")
 
     print(f"[2/3] Server certificate: {args.server_name} ({args.alg}), tunnel {srv_ip}/{net.prefixlen}")
     sdir = os.path.join(out, "server")
@@ -223,7 +242,7 @@ def cmd_quickstart(args) -> int:
     port = args.endpoint.rsplit(":", 1)[1]
     pki.write_file(os.path.join(sdir, "server.toml"), SERVER_TOML.format(
         port=port, srv_addr=f"{srv_ip}/{net.prefixlen}", subnet=net, suites=suites,
-        ca_alg=ca_alg.name, psk_line=psk_line))
+        ca_alg=ca_alg.name, psk_line=psk_line, stealth_cfg=stealth_cfg))
 
     print(f"[3/3] Client certificates: {', '.join(clients)}")
     for name in clients:
@@ -234,7 +253,7 @@ def cmd_quickstart(args) -> int:
         bundle(cdir)
         pki.write_file(os.path.join(cdir, "client.toml"), CLIENT_TOML.format(
             name=name, endpoint=args.endpoint, server_name=args.server_name, base=name, suites=suites,
-            ca_alg=ca_alg.name, psk_line=psk_line))
+            ca_alg=ca_alg.name, psk_line=psk_line, stealth_cfg=stealth_cfg))
         print(f"      {name:<16} {ip}/32  -> {cdir}")
     print(f"""
 Done. Layout:
@@ -271,7 +290,8 @@ def cmd_portal_init(args) -> int:
     password = portal_init(args.data, server_name=args.server_name, endpoint=args.endpoint, subnet=args.subnet,
                            admin=args.admin, listen=args.listen or ["127.0.0.1:8800"],
                            public_url=args.public_url or f"http://{(args.listen or ['127.0.0.1:8800'])[0]}/",
-                           issuer=args.issuer, psk=args.psk, nat=args.nat_interface, ca_alg=args.ca_alg)
+                           issuer=args.issuer, psk=args.psk, nat=args.nat_interface, ca_alg=args.ca_alg,
+                           stealth=args.stealth)
     print(f"""Portal created in {args.data}
   CA              ca/ca.crt (+ ca.key, used by the portal to issue profiles)
   VPN server      sudo python -m pqvpn server -c {os.path.join(args.data, 'server.toml')}
@@ -373,6 +393,7 @@ def main(argv=None) -> int:
     sub.add_parser("algorithms", help="list supported suites and signature algorithms").set_defaults(fn=cmd_algorithms)
     sub.add_parser("selftest", help="run an in-process handshake + data test for every suite").set_defaults(fn=cmd_selftest)
     sub.add_parser("genpsk", help="print a random 32-byte pre-shared key (base64)").set_defaults(fn=cmd_genpsk)
+    sub.add_parser("genobfs", help="print a random obfuscation key (base64) for stealth mode").set_defaults(fn=cmd_genobfs)
 
     q = sub.add_parser("quickstart", help="create a CA, server and client bundles with configs")
     q.add_argument("--out", default="vpn-pki")
@@ -384,6 +405,8 @@ def main(argv=None) -> int:
     q.add_argument("--alg", default="ML-DSA-65")
     q.add_argument("--days", type=float, default=365)
     q.add_argument("--psk", action="store_true", help="also generate a shared PSK (defence in depth)")
+    q.add_argument("--stealth", action="store_true",
+                   help="also generate an obfuscation key and stealth-mode config (harder to fingerprint)")
     q.add_argument("--passphrase-file")
     q.add_argument("--no-passphrase", action="store_true")
     q.add_argument("--force", action="store_true")
@@ -436,6 +459,8 @@ def main(argv=None) -> int:
     pi.add_argument("--public-url", default="")
     pi.add_argument("--issuer", default="ShieldsVPN")
     pi.add_argument("--psk", action="store_true")
+    pi.add_argument("--stealth", action="store_true",
+                    help="turn on stealth mode (obfuscate traffic; key copied into every issued profile)")
     pi.add_argument("--nat-interface", default="")
     pi.add_argument("--ca-alg", default="SLH-DSA-SHA2-192s")
     pi.set_defaults(fn=cmd_portal_init)

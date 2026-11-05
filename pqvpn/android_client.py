@@ -162,7 +162,9 @@ def import_profile(zip_bytes, dest_dir: str) -> dict:
         raise ProfileError("Passphrase-protected private keys are not supported on Android yet. "
                            "Download a fresh profile from the portal.")
     psk_name = _referenced(raw, "crypto", "psk_file", required=False)
-    for name in [cert_name, key_name, *ca_names] + ([psk_name] if psk_name else []):
+    obfs_name = _referenced(raw, "stealth", "key_file", required=False)  # stealth mode: an obfuscation-key file
+    needed = [cert_name, key_name, *ca_names] + ([psk_name] if psk_name else []) + ([obfs_name] if obfs_name else [])
+    for name in needed:
         if name not in files:
             raise ProfileError(f"The profile is incomplete: {name} is missing.")
 
@@ -185,7 +187,9 @@ def import_profile(zip_bytes, dest_dir: str) -> dict:
     if os.listdir(dest_dir):
         raise ProfileError("internal error: profile staging directory is not empty")
     _write(os.path.join(dest_dir, "client.toml"), stored_toml.encode("utf-8"))
-    for name in [cert_name, *ca_names]:
+    # The obfuscation key (stealth mode) is kept as a file, like the CA certificate: it is semi-public by design
+    # (every client gets the same one), so unlike the private key and PSK it is not sealed in the Keystore.
+    for name in [cert_name, *ca_names] + ([obfs_name] if obfs_name else []):
         _write(os.path.join(dest_dir, name), files[name])
 
     try:
@@ -302,7 +306,16 @@ def _install_enrolled(profile: dict, key_pem: str, dest_dir: str) -> dict:
                 raise ValueError
         except ValueError:
             raise ProfileError("The server sent an invalid pre-shared key.") from None
-    cfg = write_profile(profile, key_pem, dest_dir, key_file="device.key")  # the key itself stays sealed
+    obfs_b64 = str(profile.get("obfuscation_key") or "")
+    if obfs_b64:  # stealth mode: a file (semi-public), not a sealed secret like the key/PSK
+        try:
+            if len(base64.b64decode(obfs_b64, validate=True)) < 16:
+                raise ValueError
+        except ValueError:
+            raise ProfileError("The server sent an invalid obfuscation key.") from None
+        _write(os.path.join(dest_dir, "obfs.key"), obfs_b64.encode("ascii") + b"\n")
+    cfg = write_profile(profile, key_pem, dest_dir, key_file="device.key",  # the key itself stays sealed
+                        obfs_file="obfs.key" if obfs_b64 else None)
     summary = profile_summary(cfg, pki.Certificate.load(cfg.certificate))
     summary["enrolled"] = True
     summary["has_psk"] = bool(psk_b64)
@@ -695,6 +708,9 @@ class Session:
             raise
         self.tun = AndroidTun(cfg.mtu)
         node = self.node = ClientNode(cfg, identity, trust, self.tun, endpoint, None, self._on_state)
+        if cfg.obfuscation_key:  # stealth mode: obfuscate every datagram (obfs.py)
+            from .obfs import Obfuscator
+            node.set_obfuscator(Obfuscator(cfg.obfuscation_key))
         try:
             await open_udp_endpoint(node, sock)  # drains bursts per wake-up (node.BatchedUdpTransport)
             self.tun.start(loop, node.on_tun_packets)

@@ -18,6 +18,7 @@ from .crypto import ossl
 from .crypto.suites import DEFAULT_CA_SIG_ALGS, DEFAULT_PEER_SIG_ALGS, SUITES_BY_NAME, sig_alg_by_name
 from .netcfg import NetConfig
 from .node import ClientNode, ServerNode, make_udp_socket, open_udp_endpoint
+from .obfs import Obfuscator
 from .tun import MemoryTun, open_tun
 
 log = logging.getLogger("pqvpn")
@@ -65,6 +66,9 @@ async def run_server(cfg: ServerConfig) -> None:
     node = None
     try:
         node = ServerNode(cfg, identity, trust, tun, access)
+        if cfg.obfuscation_key:
+            node.set_obfuscator(Obfuscator(cfg.obfuscation_key))
+            log.info("stealth mode: datagrams are obfuscated (ShieldsVPN obfs v1)")
         net.configure_interface([str(a) for a in node.addresses], cfg.mtu)
         if cfg.nat_interface:
             net.enable_forwarding_nat([str(a.network) for a in node.addresses], cfg.nat_interface)
@@ -99,6 +103,8 @@ async def run_client(cfg: ClientConfig, on_state=None) -> None:
     try:
         sock = make_udp_socket("::" if family == socket.AF_INET6 else "0.0.0.0", 0, family)
         node = ClientNode(cfg, identity, trust, tun, endpoint, net, on_state)
+        if cfg.obfuscation_key:
+            node.set_obfuscator(Obfuscator(cfg.obfuscation_key))
         await open_udp_endpoint(node, sock)
         tun.start(loop, node.on_tun_packets)
         node.start_timers()

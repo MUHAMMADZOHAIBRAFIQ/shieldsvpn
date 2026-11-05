@@ -145,8 +145,8 @@ kotlin {
 val syncPqvpnPython = tasks.register<Sync>("syncPqvpnPython") {
     from(repoRoot.resolve("pqvpn")) {
         include(
-            "__init__.py", "account_client.py", "android_client.py", "config.py", "handshake.py", "node.py", "pki.py",
-            "protocol.py", "session.py", "wire.py",
+            "__init__.py", "account_client.py", "android_client.py", "config.py", "handshake.py", "node.py",
+            "obfs.py", "pki.py", "protocol.py", "session.py", "wire.py",
             "crypto/__init__.py", "crypto/kdf.py", "crypto/ossl.py", "crypto/suites.py",
         )
         into("pqvpn")

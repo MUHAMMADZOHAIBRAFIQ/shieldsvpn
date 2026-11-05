@@ -157,7 +157,9 @@ suites = [{suites}]
 peer_signature_algorithms = ["ML-DSA-65", "ML-DSA-87"]
 ca_signature_algorithms = ["{ca_alg}"]
 rekey_interval = 120
-{psk_line}"""
+{psk_line}
+[stealth]
+{stealth_line}"""
 
 _TOML_SAFE = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_:/[]@+% ")
 
@@ -170,12 +172,14 @@ def _toml_str(value, what: str) -> str:
 
 
 def write_profile(profile: dict, key_pem: str, dest_dir: str, key_file: str = "device.key",
-                  psk_file: str | None = None) -> dict:
+                  psk_file: str | None = None, obfs_file: str | None = None) -> dict:
     """Write a client profile (the same layout as a portal ZIP) from an enrollment answer and check it.
 
-    ``key_file``/``psk_file`` name where the caller keeps the private key and PSK: Android keeps both sealed in
-    the Keystore and passes key_file only for the config line; Windows writes them next to client.toml.
-    Returns the parsed ClientConfig.  Raises PortalError if the answer does not fit the key or the CA.
+    ``key_file``/``psk_file``/``obfs_file`` name where the caller keeps the private key, PSK and stealth key:
+    Android keeps the key (and PSK) sealed and passes only ``key_file`` for the config line; Windows writes them
+    next to client.toml.  ``obfs_file`` is named only when the caller wrote the obfuscation key as a file (desktop);
+    Android injects the stealth key at load time instead.  Returns the parsed ClientConfig.  Raises PortalError if
+    the answer does not fit the key or the CA.
     """
     from . import pki
     from .config import load_client
@@ -192,7 +196,8 @@ def write_profile(profile: dict, key_pem: str, dest_dir: str, key_file: str = "d
         full_tunnel="true" if profile.get("full_tunnel") else "false",
         suites=", ".join(f'"{_toml_str(s, "suite")}"' for s in suites),
         ca_alg=_toml_str(profile.get("ca_algorithm", ""), "CA algorithm"),
-        psk_line=f'psk_file = "{psk_file}"\n' if psk_file else "")
+        psk_line=f'psk_file = "{psk_file}"\n' if psk_file else "",
+        stealth_line=f'key_file = "{obfs_file}"\n' if obfs_file else "")
     os.makedirs(dest_dir, exist_ok=True)
     for name, content in (("client.toml", text), ("device.crt", profile.get("certificate", "")),
                           ("ca.crt", profile.get("ca", ""))):

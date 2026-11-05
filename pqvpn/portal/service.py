@@ -63,7 +63,9 @@ suites = [{suites}]
 peer_signature_algorithms = ["ML-DSA-65", "ML-DSA-87"]
 ca_signature_algorithms = ["{ca_alg}"]
 rekey_interval = 120
-{psk_line}"""
+{psk_line}
+[stealth]
+{stealth_line}"""
 
 README = """\
 {issuer} -- VPN profile for {username}
@@ -103,11 +105,16 @@ def issue_profile(cfg: PortalConfig, store: Store, ca: CA, user: dict) -> tuple[
         with open(cfg.psk_file, encoding="ascii") as f:
             files["psk.key"] = f.read()
         psk_line = 'psk_file = "psk.key"\n'
+    stealth_line = ""
+    if cfg.obfuscation_key:  # stealth mode: the same key goes into every profile (semi-public by design)
+        files["obfs.key"] = base64.b64encode(cfg.obfuscation_key).decode() + "\n"
+        stealth_line = 'key_file = "obfs.key"\n'
     issued = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime())
     files["client.toml"] = CLIENT_TEMPLATE.format(
         username=name, issued=issued, issuer=cfg.issuer, endpoint=cfg.endpoint, server_name=cfg.server_name,
         portal_url=cfg.vpn_portal_url or cfg.public_url, suites=", ".join(f'"{s}"' for s in cfg.suites),
-        ca_alg=ca.cert.key_alg.name, psk_line=psk_line, full_tunnel=_toml_bool(cfg.full_tunnel))
+        ca_alg=ca.cert.key_alg.name, psk_line=psk_line, stealth_line=stealth_line,
+        full_tunnel=_toml_bool(cfg.full_tunnel))
     files[f"{name}.crt"] = cert.to_pem()
     files[f"{name}.key"] = ossl.private_to_pem(key).decode("ascii")
     files["ca.crt"] = ca.pem
@@ -154,6 +161,8 @@ rekey_interval = 120
 [security]
 log_peer_addresses = false    # true writes clients' public IP:port into the log (the privacy policy says it is not)
 
+[stealth]
+{stealth_srv}
 [portal]
 database = "portal.db"        # only accounts enabled in the portal may connect
 url = "{vpn_portal_url}"      # pushed to clients ("Open portal" in the tray app)
@@ -186,12 +195,13 @@ portal_url_in_vpn = "{vpn_portal_url}"
 # true = issued profiles send ALL traffic through the VPN. The server then needs nat_interface and a DNS
 # server reachable through the tunnel (server.toml [tunnel] dns, or a plan DNS in Settings).
 full_tunnel = {full_tunnel}
-{psk_cfg}"""
+{psk_cfg}{obfs_cfg}"""
 
 
 def portal_init(data: str, *, server_name: str, endpoint: str, subnet: str, admin: str,
                 listen: list[str], public_url: str, issuer: str, psk: bool, nat: str,
-                ca_alg: str = "SLH-DSA-SHA2-192s", server_listen: str = "0.0.0.0:51820") -> str:
+                ca_alg: str = "SLH-DSA-SHA2-192s", server_listen: str = "0.0.0.0:51820",
+                stealth: bool = False) -> str:
     """Create CA, server identity, configs and the first admin.  Returns the admin's temp password."""
     from . import auth
 
@@ -226,18 +236,26 @@ def portal_init(data: str, *, server_name: str, endpoint: str, subnet: str, admi
         secure_file(os.path.join(data, "psk.key"))
         psk_line = 'psk_file = "psk.key"\n'
         psk_cfg = 'psk_file = "psk.key"\n'
+    # Stealth mode: one obfuscation key, used by the server listener and copied into every issued profile.
+    stealth_srv = '# key_file = "obfs.key"   # set to turn stealth mode on (run `pqvpn genobfs`)\n'
+    obfs_cfg = ""
+    if stealth:
+        pki.write_file(os.path.join(data, "obfs.key"), base64.b64encode(os.urandom(32)).decode() + "\n")
+        secure_file(os.path.join(data, "obfs.key"))
+        stealth_srv = 'key_file = "obfs.key"\n'
+        obfs_cfg = 'obfuscation_key_file = "obfs.key"\n'
     vpn_portal_url = f"http://{server_ip}:{listen[0].rsplit(':', 1)[1]}/"
     suites = ", ".join(f'"{s}"' for s in DEFAULT_SUITES)
     pki.write_file(os.path.join(data, "server.toml"), SERVER_TOML.format(
         listen=server_listen, subnet=net, nat=nat, suites=suites, ca_alg=alg.name, psk_line=psk_line,
-        vpn_portal_url=vpn_portal_url,
+        vpn_portal_url=vpn_portal_url, stealth_srv=stealth_srv,
         # A NAT gateway means clients get Internet access, so full-tunnel clients also need a DNS server
         # (Android refuses a full tunnel without one: its lookups would leak outside the VPN).
         dns=", ".join(f'"{d}"' for d in (FULL_TUNNEL_DNS if nat else []))))
     pki.write_file(os.path.join(data, "portal.toml"), PORTAL_TOML.format(
         listen=", ".join(f'"{x}"' for x in listen), public_url=public_url, issuer=issuer,
         server_name=server_name, endpoint=endpoint, subnet=net, server_ip=server_ip,
-        vpn_portal_url=vpn_portal_url, psk_cfg=psk_cfg, full_tunnel=_toml_bool(bool(nat))))
+        vpn_portal_url=vpn_portal_url, psk_cfg=psk_cfg, obfs_cfg=obfs_cfg, full_tunnel=_toml_bool(bool(nat))))
 
     store = Store(os.path.join(data, "portal.db"))
     secure_file(os.path.join(data, "portal.db"))

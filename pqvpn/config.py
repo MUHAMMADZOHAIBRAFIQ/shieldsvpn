@@ -60,6 +60,7 @@ class ServerConfig:
     portal_database: str = ""
     portal_url: str = ""
     log_peer_addresses: bool = False  # write clients' public IP:port into the log (off: privacy policy)
+    obfuscation_key: bytes | None = None  # stealth mode: obfuscate every datagram under this key (obfs.py)
 
 
 @dataclass
@@ -81,6 +82,7 @@ class ClientConfig:
     crypto: CryptoConfig
     revoked: set[str] = field(default_factory=set)
     portal_url: str = ""
+    obfuscation_key: bytes | None = None  # stealth mode (obfs.py); must match the server's
 
 
 @dataclass
@@ -103,6 +105,7 @@ class PortalConfig:
     ca_private_key: str
     ca_passphrase: bytes | None
     psk_file: str | None
+    obfuscation_key: bytes | None  # stealth mode: put this key into every issued profile (obfs.py)
     client_algorithm: str
     certificate_days: float
     suites: list[str]
@@ -218,6 +221,30 @@ def _read_secret(path: str | None) -> bytes | None:
         return f.read().strip() or None
 
 
+def _decode_obfs_key(path: str | None) -> bytes | None:
+    """Read and validate a base64 obfuscation key (stealth mode), or None when no path is set."""
+    if not path:
+        return None
+    raw = _read_secret(path)
+    if not raw:
+        raise ConfigError("the obfuscation key file is empty")
+    try:
+        key = base64.b64decode(raw, validate=True)
+    except ValueError:
+        raise ConfigError("the obfuscation key file must contain a base64 key (use `pqvpn genobfs`)") from None
+    if len(key) < 16:
+        raise ConfigError("the obfuscation key must be at least 16 bytes")
+    return key
+
+
+def _stealth_key(sec: _Section) -> bytes | None:
+    """The obfuscation key from a ``[stealth]`` section (``key_file``), or None when stealth is off."""
+    key_path = sec.path("key_file")
+    enabled = sec.bool("enabled", key_path is not None)
+    sec.check_unknown()
+    return _decode_obfs_key(key_path) if enabled else None
+
+
 def _crypto(sec: _Section, server: bool = False) -> CryptoConfig:
     try:
         suites = tuple(suite_by_name(n) for n in sec.strs("suites", DEFAULT_SUITES))
@@ -268,11 +295,12 @@ def _section(data: dict[str, object], name: str, base: str) -> _Section:
 
 def load_server(path: str) -> ServerConfig:
     data, base = _load(path)
-    _top(data, {"server", "tunnel", "crypto", "security", "portal"})
+    _top(data, {"server", "tunnel", "crypto", "security", "portal", "stealth"})
     s = _section(data, "server", base)
     pt = _section(data, "portal", base)
     t = _section(data, "tunnel", base)
     sec = _section(data, "security", base)
+    stealth = _section(data, "stealth", base)
     host, port = _hostport(s.str("listen", "0.0.0.0:51820"), "[server] listen")
     cfg = ServerConfig(
         listen_host=host.strip("[]"), listen_port=port,
@@ -295,6 +323,7 @@ def load_server(path: str) -> ServerConfig:
         portal_database=pt.path("database") or "",
         portal_url=pt.str("url", ""),
         log_peer_addresses=sec.bool("log_peer_addresses", False),
+        obfuscation_key=_stealth_key(stealth),
     )
     if cfg.addresses:
         try:
@@ -310,10 +339,11 @@ def load_server(path: str) -> ServerConfig:
 
 def load_client(path: str) -> ClientConfig:
     data, base = _load(path)
-    _top(data, {"client", "tunnel", "crypto", "security"})
+    _top(data, {"client", "tunnel", "crypto", "security", "stealth"})
     c = _section(data, "client", base)
     t = _section(data, "tunnel", base)
     sec = _section(data, "security", base)
+    stealth = _section(data, "stealth", base)
     host, port = _hostport(c.str("server") or _missing("client", "server"), "[client] server")
     cfg = ClientConfig(
         server_host=host, server_port=port,
@@ -332,6 +362,7 @@ def load_client(path: str) -> ClientConfig:
         crypto=_crypto(_section(data, "crypto", base)),
         revoked={x.lower() for x in sec.strs("revoked_serials")},
         portal_url=c.str("portal_url", ""),
+        obfuscation_key=_stealth_key(stealth),
     )
     if not _IFNAME.match(cfg.interface):
         raise ConfigError("[tunnel] interface must be 1-15 chars of [A-Za-z0-9_-]")
@@ -381,6 +412,7 @@ def load_portal(path: str) -> PortalConfig:
         ca_private_key=v.path("ca_private_key") or _missing("vpn", "ca_private_key"),
         ca_passphrase=_read_secret(v.path("ca_passphrase_file")),
         psk_file=v.path("psk_file"),
+        obfuscation_key=_decode_obfs_key(v.path("obfuscation_key_file")),
         client_algorithm=alg,
         certificate_days=float(v.int("certificate_days", 90, 1, 3650)),
         suites=suites,

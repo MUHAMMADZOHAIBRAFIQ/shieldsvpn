@@ -191,11 +191,15 @@ def bundle(cfg: PortalConfig, ca, device: dict, cert: pki.Certificate) -> dict:
     (profiles issued by an administrator keep the PSK and its extra protection).
     """
     psk = ""
+    # Stealth mode: the obfuscation key is shared with every device (it is semi-public by design; see SECURITY.md),
+    # so unlike the PSK it is handed out here.  Empty when the portal has no stealth key configured.
+    obfs = base64.b64encode(cfg.obfuscation_key).decode() if cfg.obfuscation_key else ""
     return {
         "subject": device["subject"], "address": device["vpn_ip"], "certificate": cert.to_pem(), "ca": ca.pem,
         "server": cfg.endpoint, "server_name": cfg.server_name, "suites": list(cfg.suites),
         "ca_algorithm": ca.cert.key_alg.name, "key_algorithm": cfg.client_algorithm,
         "full_tunnel": cfg.full_tunnel, "portal_url": cfg.vpn_portal_url or cfg.public_url, "psk": psk,
+        "obfuscation_key": obfs,
         "expires": cert.not_after, "renew_after": cert.not_after - RENEW_BEFORE,
     }
 
