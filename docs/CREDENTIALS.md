@@ -7,12 +7,12 @@ keys, PSKs, passwords or tokens into issues, chats, screenshots or this file.
 
 | Material | Typical file | Who holds it | Impact if leaked |
 | --- | --- | --- | --- |
-| CA private key (SLH-DSA) | `ca.key` | Offline / portal host only | Attacker can mint server and client certificates. Rotation means a new CA and reissuing everything. |
+| CA private key (SLH-DSA) | `ca.key` | Offline / portal host only | Attacker can mint server and client certificates. Rotation means a new CA and reissuing everything. **Today the portal keeps this key online** to register app devices, so a portal compromise can mint a server certificate; see AUDIT-2026-11.md finding C1 for the planned split. |
 | Server private key (ML-DSA) | `server.key` | VPN server | Server impersonation. |
 | Client private key (ML-DSA) | `client.key`, inside the profile ZIP | One device | Connecting as that user until the serial is superseded or revoked. |
 | Pre-shared key (32 bytes, base64) | `psk.key` / `psk_file` | Server and all clients | Removes the PSK layer only. The certificates still authenticate. |
-| Portal database | `portal.db` (+ `-wal`, `-shm`) | Portal host | Password hashes, TOTP seeds, e-mail addresses, sealed vault entries. |
-| Portal vault key | `portal-secrets.key` | Portal host | Decrypts the sealed secrets in the database. |
+| Portal database | `portal.db` (+ `-wal`, `-shm`) | Portal host | Password hashes, e-mail addresses, sealed vault entries (SMTP password, Paddle keys and, since 2026-11-05, 2FA seeds). |
+| Portal vault key | `portal-secrets.key` | Portal host | Decrypts the sealed secrets in the database. **Losing it** means re-entering the SMTP password and Paddle keys and resetting 2FA for every account that uses it (Admin → user → Reset 2FA): back it up, apart from `portal.db`. |
 | Key passphrase files | `*_passphrase_file` | Next to the key | Unlocks the matching encrypted key. |
 | Android release keystore and properties | `*.jks`, `keystore.properties` | Release machine | App-update impersonation on users' phones. |
 | Firebase or other service-account JSON | `*firebase*.json` | Portal host | Access to that cloud project. |
@@ -28,6 +28,28 @@ Paddle's client-side token (`test_…`/`live_…`) is public by design: it is se
 
 Configuration files (`server.toml`, `client.toml`, `portal.toml`) refer to secrets **by path**. Keep it that way:
 never inline a secret into a config file. Templates with placeholders are in [deploy/examples/](../deploy/examples/).
+
+### Handing secrets to the services (systemd credentials)
+
+A path may contain `${NAME}`, which is replaced by that environment variable when the config is read; an unset or
+empty variable is a configuration error (fail closed). This is meant for systemd's credentials, which keep key files
+out of the service's config directory and out of its environment:
+
+```ini
+# in the unit: systemd copies the files into a private, root-only, per-service tmpfs at start
+LoadCredential=server.key:/etc/pqvpn/secrets/server.key
+LoadCredential=psk.key:/etc/pqvpn/secrets/psk.key
+```
+
+```toml
+# server.toml
+private_key = "${CREDENTIALS_DIRECTORY}/server.key"
+psk_file = "${CREDENTIALS_DIRECTORY}/psk.key"
+```
+
+Secret *values* are deliberately not read from environment variables: environments are inherited by child
+processes (the portal starts Node.js for e-mail), shown by `systemctl show` and readable in `/proc/<pid>/environ`
+by the same user. Files with mode 0600, or systemd credentials, have none of those leaks.
 
 ## Guard rails in this repository
 
@@ -91,11 +113,10 @@ The PSK is shared by the server and every client, so rotating it requires reissu
 
 To avoid a hard cut-over, schedule it and announce it. pqvpn deliberately has no "accept two PSKs" mode.
 
-**App-registered devices** also hold the PSK (every registration receives it, so with registration switched on the
-PSK is effectively public; see [SECURITY.md](SECURITY.md)). They pick up a new PSK only when they renew their
-certificate. After a rotation they cannot connect until they register again (Android: Remove profile, then Set
-up; Windows: delete `%LOCALAPPDATA%\pqvpn\device` and run `pqvpn app --portal ...`). Automatic PSK refresh for
-app devices is not built.
+**App-registered devices** hold no PSK (anyone can register, so a PSK handed to them would be public); the server
+accepts them with `[crypto] psk_optional = true`, so a PSK rotation does not affect them. Devices registered by
+builds from before 2026-10-23 did receive the PSK: after a rotation they fail until they renew or register again
+(Android: Remove profile, then Connect; Windows: delete `%LOCALAPPDATA%\pqvpn\device` and run `pqvpn app --portal ...`).
 
 ### C. Server key
 
@@ -127,6 +148,14 @@ in Admin → Settings → Payments (an empty field keeps the saved value), then 
 Create a new JSON key for the service account in Google Cloud, paste it in Admin → Settings → Google Play Billing
 (the portal checks it with Google before keeping it), then delete the old key in Google Cloud. If the account itself
 may be compromised, remove its access in Play Console → Users and permissions first.
+
+### F3. Portal vault key (`portal-secrets.key`)
+
+There is no re-encryption tool yet (planned with the backup work, AUDIT-2026-11.md Phase 6). If the key leaked
+together with a copy of `portal.db`: rotate the SMTP App Password and the Paddle keys at their providers and enter
+the new ones, and have every account with 2FA enrol again (Admin → user → Reset 2FA). Then stop the portal, move
+the old key away, start it (a new key is created) and re-enter the secrets. Old sealed values that can no longer be
+opened read as empty: e-mail and payments stop until re-entered, and 2FA codes fail closed until reset.
 
 ### G. Android release keystore
 

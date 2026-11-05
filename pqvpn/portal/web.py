@@ -41,14 +41,14 @@ import urllib.parse
 from .. import __version__, account_client, logo
 from ..config import PortalConfig
 from ..crypto.suites import describe_suite
-from ..protocol import RateLimiter
+from ..protocol import RateLimiter, source_key
 from . import accounts, api, auth, devices, firebase, google, mail, payments, plans, play, products, rewards
 from .accounts import (LOCK_SECONDS, MAX_FAILURES, REDACTED_ACTOR, RESET_MAX_ATTEMPTS, RESET_TTL,  # noqa: F401
                        SIGNUP_TTL, USERNAME_RE, mask_email)
 from .qr import QrCode
 from .service import CA, issue_profile
 from .store import Store
-from .vault import Vault
+from .vault import Vault, VaultError
 
 log = logging.getLogger("pqvpn.portal")
 e = html.escape
@@ -160,6 +160,33 @@ class Portal:
         if reseal:
             self.store.set_settings(reseal)
             log.info("re-sealed %d plaintext secret(s) in the database", len(reseal))
+        users = [u for u in self.store.users() if u["totp_secret"] and not Vault.is_sealed(u["totp_secret"])]
+        for u in users:
+            self.store.update_user(u["id"], totp_secret=self.seal_totp(u["id"], u["totp_secret"]))
+        if users:
+            log.info("sealed the 2FA secrets of %d account(s)", len(users))
+
+    # -------------------------------------------------------------- 2FA secrets (sealed at rest, like the SMTP password)
+    # The name doubles as associated data, so a sealed seed copied onto another account's row does not open there.
+    def seal_totp(self, user_id: int, secret: str) -> str:
+        return self.vault.seal(f"totp_secret:{user_id}", secret)
+
+    def totp_secret(self, user: dict) -> str:
+        """The account's TOTP seed in clear, or "" when it has none or it cannot be decrypted (codes then fail)."""
+        try:
+            return self.vault.open(f"totp_secret:{user['id']}", user["totp_secret"] or "")
+        except VaultError as exc:
+            log.error("cannot decrypt the 2FA secret of %s: %s", user["username"], exc)
+            return ""
+
+    def seal_pending_totp(self, user_id: int, secret: str) -> str:
+        return self.vault.seal(f"pending_totp_secret:{user_id}", secret)
+
+    def pending_totp(self, session: dict) -> str:
+        try:
+            return self.vault.open(f"pending_totp_secret:{session['user_id']}", session["pending_totp_secret"] or "")
+        except VaultError:
+            return ""  # e.g. the vault key was replaced: the setup page simply starts over with a new secret
 
     def settings(self) -> dict:
         s = self.store.settings({**mail.DEFAULT_SETTINGS, **plans.DEFAULT_SETTINGS, **PORTAL_DEFAULTS,
@@ -212,8 +239,8 @@ class Portal:
             return self._ca
 
     def allow_attempt(self, ip: str) -> bool:
-        with self.limiter_lock:
-            return self.limiter.allow(ip, time.monotonic())
+        with self.limiter_lock:  # one bucket per IPv4 address or IPv6 /64 (protocol.source_key)
+            return self.limiter.allow(source_key(ip), time.monotonic())
 
     def allow_device(self, device_id: int) -> bool:
         with self.limiter_lock:
@@ -659,7 +686,7 @@ def do_2fa(h: Handler) -> None:
     if not h.portal.allow_attempt(h.ip):
         return page_2fa(h, "Too many attempts. Wait a minute and try again.", 429)
     device = h._known_device(user["id"])
-    step = auth.verify_totp(user["totp_secret"] or "", h.form.get("code", ""), user["totp_last_step"])
+    step = auth.verify_totp(h.portal.totp_secret(user), h.form.get("code", ""), user["totp_last_step"])
     if step is None:
         failures = (device["failed_logins"] if device else user["failed_logins"]) + 1
         lock = failures >= MAX_FAILURES
@@ -1134,10 +1161,10 @@ def page_2fa_setup(h: Handler, error: str = "") -> None:
     u = h.user
     if u["totp_enabled"]:
         return h._redirect("/account")
-    secret = h.session["pending_totp_secret"]
+    secret = h.portal.pending_totp(h.session)
     if not secret:
         secret = auth.new_totp_secret()
-        h.portal.store.set_session(h.token, pending_totp_secret=secret)
+        h.portal.store.set_session(h.token, pending_totp_secret=h.portal.seal_pending_totp(u["id"], secret))
     uri = auth.otpauth_uri(secret, u["username"], h.portal.cfg.issuer)
     grouped = " ".join(secret[i:i + 4] for i in range(0, len(secret), 4))
     msg = f'<p class="alert">{e(error)}</p>' if error else ""
@@ -1152,13 +1179,14 @@ def page_2fa_setup(h: Handler, error: str = "") -> None:
 
 
 def do_2fa_setup(h: Handler) -> None:
-    secret = h.session["pending_totp_secret"]
+    secret = h.portal.pending_totp(h.session)
     if not secret:
         return h._redirect("/account/2fa")
     step = auth.verify_totp(secret, h.form.get("code", ""), 0)
     if step is None:
         return page_2fa_setup(h, "That code did not match. Check your phone's clock and try again.")
-    h.portal.store.update_user(h.user["id"], totp_secret=secret, totp_enabled=1, totp_last_step=step)
+    h.portal.store.update_user(h.user["id"], totp_secret=h.portal.seal_totp(h.user["id"], secret), totp_enabled=1,
+                               totp_last_step=step)
     h.portal.store.set_session(h.token, pending_totp_secret=None)
     h._audit("2fa_enabled")
     h.user = h.portal.store.user(h.user["id"])
@@ -1601,6 +1629,7 @@ _APP_NUMBERS = (
     ("reward_min_seconds", "Web ad: minimum seconds on the page"), ("pro_device_limit", "Devices per account"),
     ("device_cleanup_days", "Forget unused anonymous devices after (days)"),
     ("enroll_per_ip_day", "New devices per network per day"),
+    ("enroll_per_hour", "New devices per hour, all networks"),
     ("toggle_ad_gap", "Seconds between connect/disconnect ads (0 = every time)"),
     ("reward_gap_seconds", "Seconds between two ads for free time"),
 )
@@ -1651,7 +1680,8 @@ def do_admin_settings_apps(h: Handler) -> None:
         return page_admin_settings(h, error="Choose when the connect/disconnect ad is shown.")
     for k, label in _APP_NUMBERS:
         lo, hi = devices.LIMITS[k]
-        default = str(devices.number(current, k)) if k in ("toggle_ad_gap", "reward_gap_seconds") else ""
+        default = (str(devices.number(current, k)) if k in ("toggle_ad_gap", "reward_gap_seconds", "enroll_per_hour")
+                   else "")
         try:
             n = int(h.form.get(k, default))
         except ValueError:
@@ -2149,7 +2179,8 @@ ads, or Pro), what they use and how they pay.</p></div></div>
 <dt>Ads per device per day</dt><dd>{devices.number(s, "free_daily_rewards")}, one after another (wait
 {devices.number(s, "reward_gap_seconds")} s between two) to build up time</dd>
 <dt>Devices with free time left</dt><dd>{total['with_free_time']}</dd>
-<dt>New devices per network per day</dt><dd>{devices.number(s, "enroll_per_ip_day")}</dd>
+<dt>New devices per network per day</dt><dd>{devices.number(s, "enroll_per_ip_day")} (IPv6: per /64)</dd>
+<dt>New devices per hour, all networks</dt><dd>{devices.number(s, "enroll_per_hour")}</dd>
 <dt>Unused anonymous devices removed after</dt><dd>{devices.number(s, "device_cleanup_days")} days</dd></dl>
 <p class="small"><a href="/admin/settings#apps">App settings</a></p></section>
 <section class="card"><h2>Pro</h2><dl class="grid wide">

@@ -32,7 +32,7 @@ from .pki import Certificate, Identity, TrustStore
 from .protocol import (HALF_OPEN_TIMEOUT, HANDSHAKE_ATTEMPT_TIME, HEADER_LEN, KEEPALIVE_TIMEOUT,
                        MT_AUTH_I, MT_AUTH_R, MT_COOKIE, MT_INIT, MT_NAMES, MT_RESPONSE, MT_RETRY,
                        PT_DATA, PT_HANDSHAKE, REKEY_TIMEOUT, TAG_LEN, RateLimiter, Reassembler,
-                       parse_hs)
+                       parse_hs, source_key)
 from .session import Keypair, RouteTable, dst_addr, pad, src_addr, unpad
 from .wire import DecodeError
 
@@ -109,7 +109,11 @@ class BaseNode(asyncio.DatagramProtocol):
                     return
                 self.on_handshake(hdr, payload, addr)
         except Exception:  # a single bad packet must never take the node down
-            log.exception("error processing datagram from %s", addr)
+            log.exception("error processing datagram from %s", self._where(addr))
+
+    def _where(self, addr) -> str:
+        """How a remote address appears in the log (the server hides clients' addresses unless configured)."""
+        return "%s:%d" % (addr[0], addr[1])
 
     def on_tun_packets(self, packets: list[bytes]) -> None:
         for pkt in packets:
@@ -266,6 +270,13 @@ class ServerNode(BaseNode):
         if not self.addresses:
             raise ValueError("server has no tunnel address (certificate or [tunnel] addresses)")
         self._last_status = 0.0
+        # Clients' public addresses stay out of the log unless the operator opts in ([security] log_peer_addresses):
+        # the privacy policy promises that live connection data is overwritten and gone after a disconnect, and an
+        # INFO line per handshake (every rekey, ~2 min) would keep "device <-> IP <-> time" on disk indefinitely.
+        self.log_addresses = bool(getattr(cfg, "log_peer_addresses", False))
+
+    def _where(self, addr) -> str:
+        return super()._where(addr) if self.log_addresses else "a client"
 
     # -------------------------------------------------------------- policy hook
     def config_for(self, cert: Certificate) -> dict:
@@ -305,7 +316,7 @@ class ServerNode(BaseNode):
             try:
                 flight, result = hs.on_auth_fragment(hdr, payload, now)
             except (HandshakeError, DecodeError) as exc:
-                log.warning("handshake from %s:%d rejected: %s", *addr, exc)
+                log.warning("handshake from %s rejected: %s", self._where(addr), exc)
                 self._forget(hs)
                 return
             self.send_raw(flight, addr)
@@ -322,13 +333,13 @@ class ServerNode(BaseNode):
         # load is measured by the ones still costing us state and CPU.
         pending = sum(1 for h in self.half_open.values() if h.m4_flight is None)
         under_load = self.cfg.always_require_cookie or pending >= self.cfg.cookie_threshold
-        if under_load and not self.rate.allow(addr[0], now):
+        if under_load and not self.rate.allow(source_key(addr[0]), now):
             return
         try:
             flight, hs = self.responder.on_init(hdr, body, addr, now, require_cookie=under_load,
                                                 taken_indices=self._taken())
         except (HandshakeError, DecodeError) as exc:
-            log.info("INIT from %s:%d rejected: %s", *addr, exc)
+            log.info("INIT from %s rejected: %s", self._where(addr), exc)
             return
         self.send_raw(flight, addr)
         if hs is not None:
@@ -336,7 +347,7 @@ class ServerNode(BaseNode):
                 self._forget(next(iter(self.half_open.values())))
             self.half_open[hs.r_index] = hs
             self.init_index[key] = hs.r_index
-            log.debug("INIT from %s:%d -> RESPONSE (%s)", *addr, hs.suite.name)
+            log.debug("INIT from %s -> RESPONSE (%s)", self._where(addr), hs.suite.name)
 
     def _taken(self) -> set[int]:
         return set(self.indices) | set(self.half_open)
@@ -350,7 +361,8 @@ class ServerNode(BaseNode):
     def _establish(self, result: Result, addr, now: float) -> None:
         cert = result.peer_cert
         peer = self.peers.get(cert.subject)
-        if peer is None:
+        new = peer is None
+        if new:
             peer = self.peers[cert.subject] = Peer(cert, addr)
         elif peer.cert.encode() != cert.encode():
             self.routes.remove_value(peer)
@@ -361,8 +373,10 @@ class ServerNode(BaseNode):
             if old is not None and old is not peer:
                 log.warning("address %s moved from %s to %s", net, old.name, peer.name)
         self.install(peer, result, now)
-        log.info("peer %s authenticated from %s:%d [%s, %s%s] -> %s", cert.subject, *addr,
-                 result.suite.name, cert.key_alg.name, ", PSK" if result.psk_used else "", ", ".join(cert.addresses))
+        # A new session at INFO; the rekeys every ~2 minutes at DEBUG (1,000 peers would write ~8 lines a second).
+        log.log(logging.INFO if new else logging.DEBUG, "peer %s %s from %s [%s, %s%s] -> %s", cert.subject,
+                "connected" if new else "rekeyed", self._where(addr), result.suite.name, cert.key_alg.name,
+                ", PSK" if result.psk_used else "", ", ".join(cert.addresses))
 
     def disconnect(self, name: str, reason: str) -> None:
         peer = self.peers.pop(name, None)
@@ -379,7 +393,7 @@ class ServerNode(BaseNode):
         # Roaming: follow the client to a new address, but only on the
         # newest authenticated packet so replays cannot redirect traffic.
         if addr != peer.endpoint and kp is peer.current and counter == kp.replay.top:
-            log.info("peer %s roamed %s:%d -> %s:%d", peer.name, *peer.endpoint, *addr)
+            log.info("peer %s roamed %s -> %s", peer.name, self._where(peer.endpoint), self._where(addr))
             peer.endpoint = addr
 
     def route_outbound(self, pkt: bytes) -> None:
@@ -410,8 +424,11 @@ class ServerNode(BaseNode):
             self._last_status = now
             self.rate.prune(now)
             if self.peers:
-                log.info("status: %d peer(s): %s", len(self.peers), ", ".join(
-                    f"{p.name}(rx {p.rx_bytes} B, tx {p.tx_bytes} B)" for p in self.peers.values()))
+                log.info("status: %d peer(s), rx %d B, tx %d B in total", len(self.peers),
+                         sum(p.rx_bytes for p in self.peers.values()), sum(p.tx_bytes for p in self.peers.values()))
+                if log.isEnabledFor(logging.DEBUG):
+                    log.debug("peers: %s", ", ".join(f"{p.name}(rx {p.rx_bytes} B, tx {p.tx_bytes} B)"
+                                                     for p in self.peers.values()))
 
 
 # ====================================================================== client

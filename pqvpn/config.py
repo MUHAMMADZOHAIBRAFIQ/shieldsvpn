@@ -17,6 +17,9 @@ from .crypto.suites import (DEFAULT_CA_SIG_ALGS, DEFAULT_PEER_SIG_ALGS, DEFAULT_
                             sig_alg_by_name, suite_by_name)
 
 _IFNAME = re.compile(r"^[A-Za-z0-9_\-]{1,15}$")
+# ${NAME} in a path: lets a service manager hand secrets over as files outside the config directory, e.g. systemd's
+# LoadCredential= (private_key = "${CREDENTIALS_DIRECTORY}/server.key").  Secrets stay files referenced by path.
+_ENV_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
 class ConfigError(Exception):
@@ -56,6 +59,7 @@ class ServerConfig:
     handshake_rate: float
     portal_database: str = ""
     portal_url: str = ""
+    log_peer_addresses: bool = False  # write clients' public IP:port into the log (off: privacy policy)
 
 
 @dataclass
@@ -158,12 +162,20 @@ class _Section:
             raise ConfigError(f"[{self.name}] {key} must be a list of strings")
         return cast(list[str], v)
 
+    def _resolve(self, key: str, value: str) -> str:
+        def env(m: re.Match) -> str:
+            v = os.environ.get(m.group(1))
+            if not v:  # fail closed: an unset variable must not silently turn into a relative path
+                raise ConfigError(f"[{self.name}] {key}: environment variable {m.group(1)} is not set")
+            return v
+        return os.path.normpath(os.path.join(self.base, os.path.expanduser(_ENV_REF.sub(env, value))))
+
     def path(self, key: str, default: str | None = None) -> str | None:
         v = self.str(key, default)
-        return None if v is None else os.path.normpath(os.path.join(self.base, os.path.expanduser(v)))
+        return None if v is None else self._resolve(key, v)
 
     def paths(self, key: str) -> list[str]:
-        return [os.path.normpath(os.path.join(self.base, os.path.expanduser(p))) for p in self.strs(key)]
+        return [self._resolve(key, p) for p in self.strs(key)]
 
     def check_unknown(self):
         extra = set(self.data) - self.used
@@ -282,6 +294,7 @@ def load_server(path: str) -> ServerConfig:
         handshake_rate=float(sec.int("handshake_rate_per_ip", 5, 1, 10000)),
         portal_database=pt.path("database") or "",
         portal_url=pt.str("url", ""),
+        log_peer_addresses=sec.bool("log_peer_addresses", False),
     )
     if cfg.addresses:
         try:

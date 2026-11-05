@@ -29,7 +29,8 @@ rekey_interval = 120
 revoked_serials = []                            # e.g. ["<CERT_SERIAL_HEX>"] from `pqvpn show client.crt`
 max_peers = 1024
 cookie_threshold = 64
-handshake_rate_per_ip = 5
+handshake_rate_per_ip = 5                       # per IPv4 address / IPv6 /64, applied under load
+log_peer_addresses = false                      # true writes clients' public IP:port into the log (see privacy policy)
 
 # [portal]
 # database = "/var/lib/pqvpn/portal.db"         # secret-bearing database: enables account-based access control

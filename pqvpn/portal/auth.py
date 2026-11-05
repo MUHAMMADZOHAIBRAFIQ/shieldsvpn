@@ -118,9 +118,13 @@ def totp_step(now: float | None = None) -> int:
 
 
 def verify_totp(secret_b32: str, code: str, last_step: int, now: float | None = None) -> int | None:
-    """Return the matching time step (store it!) or None.  Steps <= last_step are replays."""
+    """Return the matching time step (store it!) or None.  Steps <= last_step are replays.
+
+    An empty secret never matches: HMAC with an empty key is computable by anyone, so a missing or unreadable seed
+    must fail closed rather than accept the codes of that well-known key.
+    """
     code = digits_only(code)
-    if len(code) != TOTP_DIGITS:
+    if not secret_b32 or len(code) != TOTP_DIGITS:
         return None
     current = totp_step(now)
     for step in (current - 1, current, current + 1):

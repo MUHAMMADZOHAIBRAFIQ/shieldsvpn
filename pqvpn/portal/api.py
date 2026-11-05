@@ -222,7 +222,7 @@ def login(h, body: dict, device: dict, _url) -> None:
     if user["totp_enabled"]:
         if not code:  # password was right: ask for the second factor without counting a failure
             raise DeviceError(401, "totp_required", "enter the 6-digit code from your authenticator app")
-        step = auth.verify_totp(user["totp_secret"] or "", code, user["totp_last_step"])
+        step = auth.verify_totp(h.portal.totp_secret(user), code, user["totp_last_step"])
         if step is None:
             _login_failure(h, user, device, known, now)
             raise DeviceError(401, "totp_invalid", "that code is not valid (or was already used)")
@@ -400,7 +400,7 @@ def delete_account(h, body: dict, device: dict, _url) -> None:
         code = _text(body, "code", 16, required=False)
         if not code:
             raise DeviceError(401, "totp_required", "enter the 6-digit code from your authenticator app")
-        if auth.verify_totp(user["totp_secret"] or "", code, user["totp_last_step"]) is None:
+        if auth.verify_totp(h.portal.totp_secret(user), code, user["totp_last_step"]) is None:
             _login_failure(h, user, device, known, now)
             raise DeviceError(401, "totp_invalid", "that code is not valid (or was already used)")
     store.delete_user(user["id"])

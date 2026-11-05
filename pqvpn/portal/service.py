@@ -14,6 +14,7 @@ import base64
 import io
 import ipaddress
 import os
+import threading
 import time
 import zipfile
 
@@ -26,6 +27,10 @@ from .store import Store, secure_file
 
 class CA:
     def __init__(self, cfg: PortalConfig):
+        # Issuing a certificate costs one CA signature (SLH-DSA: hundreds of milliseconds of CPU).  The portal answers
+        # every request in its own thread, so without a bound a burst of registrations would take every core and
+        # starve the VPN server on the same host.  One signature at a time; the others queue.
+        self.sign_slot = threading.BoundedSemaphore(1)
         self.cert = pki.Certificate.load(cfg.ca_certificate)
         self.key = pki.read_private_key(cfg.ca_private_key, cfg.ca_passphrase)
         if self.cert.key_alg.public_bytes(self.key) != self.cert.public_key:
@@ -84,10 +89,11 @@ def issue_profile(cfg: PortalConfig, store: Store, ca: CA, user: dict) -> tuple[
         user = {**user, "vpn_ip": ip}
     alg = sig_alg_by_name(cfg.client_algorithm)
     key = alg.generate()
-    cert = pki.issue(role=pki.ROLE_CLIENT, subject=user["username"], key_alg=alg,
-                     public_key=alg.public_bytes(key), addresses=[f"{user['vpn_ip']}/32"],
-                     days=cfg.certificate_days, issuer_key=ca.key, issuer_alg=ca.cert.key_alg,
-                     issuer_public=ca.cert.public_key)
+    with ca.sign_slot:
+        cert = pki.issue(role=pki.ROLE_CLIENT, subject=user["username"], key_alg=alg,
+                         public_key=alg.public_bytes(key), addresses=[f"{user['vpn_ip']}/32"],
+                         days=cfg.certificate_days, issuer_key=ca.key, issuer_alg=ca.cert.key_alg,
+                         issuer_public=ca.cert.public_key)
     store.update_user(user["id"], active_serial=cert.serial_hex, profile_issued_at=int(time.time()))
 
     name = user["username"]
@@ -145,6 +151,9 @@ peer_signature_algorithms = ["ML-DSA-65", "ML-DSA-87"]
 ca_signature_algorithms = ["{ca_alg}"]
 rekey_interval = 120
 {psk_line}
+[security]
+log_peer_addresses = false    # true writes clients' public IP:port into the log (the privacy policy says it is not)
+
 [portal]
 database = "portal.db"        # only accounts enabled in the portal may connect
 url = "{vpn_portal_url}"      # pushed to clients ("Open portal" in the tray app)

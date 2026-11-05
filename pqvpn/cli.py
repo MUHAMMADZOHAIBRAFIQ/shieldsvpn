@@ -156,6 +156,7 @@ revoked_serials = []
 max_peers = 1024
 cookie_threshold = 64
 handshake_rate_per_ip = 5
+log_peer_addresses = false   # true writes clients' public IP:port into the log
 """
 
 CLIENT_TOML = """\

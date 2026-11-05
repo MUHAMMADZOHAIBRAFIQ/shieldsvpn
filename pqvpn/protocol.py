@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import math
 import os
 import struct
@@ -209,8 +210,26 @@ class CookieJar:
             hmac.compare_digest(cookie, self._mac(s, ip, port, index, nonce)) for s in self.secrets)
 
 
+def source_key(ip: str) -> str:
+    """The abuse-limit bucket of a client address: the address itself for IPv4, its /64 network for IPv6.
+
+    An IPv6 subscriber normally holds a whole /64 (RFC 6177, RFC 7934) and can use a fresh source address for every
+    request, so per-address counting would hand an attacker an unlimited number of buckets.  IPv4-mapped IPv6
+    addresses count as the IPv4 address.  Anything that is not an IP address is returned unchanged.
+    """
+    try:
+        addr = ipaddress.ip_address(ip.split("%")[0])
+    except ValueError:
+        return ip
+    if addr.version == 6:
+        if addr.ipv4_mapped:
+            return str(addr.ipv4_mapped)
+        return str(ipaddress.ip_network(f"{addr}/64", strict=False))
+    return str(addr)
+
+
 class RateLimiter:
-    """Per-source token bucket for handshake initiations."""
+    """Per-source token bucket for handshake initiations (key it with ``source_key``)."""
 
     def __init__(self, rate: float, burst: float, max_sources: int = 65536):
         self.rate, self.burst, self.max_sources = rate, burst, max_sources

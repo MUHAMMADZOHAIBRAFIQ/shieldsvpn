@@ -179,6 +179,7 @@ CREATE INDEX IF NOT EXISTS password_resets_user ON password_resets (user_id, cre
 CREATE INDEX IF NOT EXISTS devices_user ON devices (user_id, last_used);
 CREATE INDEX IF NOT EXISTS vpn_devices_user ON vpn_devices (user_id);
 CREATE INDEX IF NOT EXISTS vpn_devices_enroll ON vpn_devices (enroll_ip, created_at);
+CREATE INDEX IF NOT EXISTS vpn_devices_created ON vpn_devices (created_at);
 CREATE INDEX IF NOT EXISTS vpn_devices_install ON vpn_devices (install_hash);
 CREATE INDEX IF NOT EXISTS reward_grants_device ON reward_grants (device_id, granted_at);
 CREATE INDEX IF NOT EXISTS play_purchases_due ON play_purchases (replaced, expires);
@@ -353,9 +354,14 @@ class Store:
     def delete_vpn_device(self, device_id: int) -> None:
         self._exec("DELETE FROM vpn_devices WHERE id = ?", (device_id,))
 
-    def enrollments_since(self, ip: str, since: int) -> int:
+    def enrollments_since(self, network: str, since: int) -> int:
+        """Devices registered from ``network`` (protocol.source_key: IPv4 address or IPv6 /64) since ``since``."""
         return self._one("SELECT COUNT(*) AS n FROM vpn_devices WHERE enroll_ip = ? AND created_at >= ?",
-                         (ip, since))["n"]
+                         (network, since))["n"]
+
+    def enrollments_since_any(self, since: int) -> int:
+        """Devices registered from anywhere since ``since`` (the global cap on CA signing work)."""
+        return self._one("SELECT COUNT(*) AS n FROM vpn_devices WHERE created_at >= ?", (since,))["n"]
 
     def device_counts(self) -> dict:
         row = self._one("SELECT COUNT(*) AS total, SUM(user_id IS NULL) AS anonymous FROM vpn_devices")

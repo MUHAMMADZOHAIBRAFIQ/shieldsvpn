@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from .. import pki
 from ..config import PortalConfig
 from ..crypto.suites import sig_alg_by_name
+from ..protocol import source_key
 from . import auth, plans
 from .store import Store
 
@@ -54,7 +55,8 @@ APP_DEFAULTS = {
     "reward_min_seconds": "20",  # web ad: minimum time the page must stay open before time is granted
     "pro_device_limit": "5",     # devices one account may be signed in on at once
     "device_cleanup_days": "30",  # forget anonymous devices unseen for this long
-    "enroll_per_ip_day": "20",   # enrollments per source address per 24 h
+    "enroll_per_ip_day": "20",   # enrollments per network (IPv4 address / IPv6 /64) per 24 h
+    "enroll_per_hour": "300",    # enrollments per hour from all networks together (bounds CA signing work)
     "toggle_ads": "connect",     # Free devices: interstitial after "connect", after "both" connect and disconnect, "off"
     "toggle_ad_gap": "0",        # at least this many seconds between two such interstitials (0 = every time)
     "reward_gap_seconds": "10",  # wait between two ads for free time; ads may follow each other to build up time
@@ -67,6 +69,7 @@ REWARD_IDLE_SECONDS = 12
 # (min, max) for the numeric settings; the admin form and every reader clamp to these.
 LIMITS = {"free_minutes": (1, 24 * 60), "free_daily_rewards": (1, 200), "reward_min_seconds": (5, 300),
           "pro_device_limit": (1, 50), "device_cleanup_days": (1, 3650), "enroll_per_ip_day": (1, 10000),
+          "enroll_per_hour": (1, 100000),
           "toggle_ad_gap": (0, 3600), "reward_gap_seconds": (0, 3600)}
 
 
@@ -119,9 +122,10 @@ def _public_key(cfg: PortalConfig, key_alg: str, public_key_b64: str) -> bytes:
 
 def _issue(cfg: PortalConfig, store: Store, ca, device: dict, public_key: bytes) -> pki.Certificate:
     alg = sig_alg_by_name(cfg.client_algorithm)
-    cert = pki.issue(role=pki.ROLE_CLIENT, subject=device["subject"], key_alg=alg, public_key=public_key,
-                     addresses=[f"{device['vpn_ip']}/32"], days=cfg.certificate_days, issuer_key=ca.key,
-                     issuer_alg=ca.cert.key_alg, issuer_public=ca.cert.public_key)
+    with ca.sign_slot:  # one CA signature at a time (service.CA): a burst of sign-ups cannot take every core
+        cert = pki.issue(role=pki.ROLE_CLIENT, subject=device["subject"], key_alg=alg, public_key=public_key,
+                         addresses=[f"{device['vpn_ip']}/32"], days=cfg.certificate_days, issuer_key=ca.key,
+                         issuer_alg=ca.cert.key_alg, issuer_public=ca.cert.public_key)
     store.update_vpn_device(device["id"], active_serial=cert.serial_hex, cert_expires=cert.not_after)
     return cert
 
@@ -145,12 +149,16 @@ def enroll(cfg: PortalConfig, store: Store, ca, settings: dict, platform: str, k
     if platform not in PLATFORMS:
         raise DeviceError(400, "bad_platform", "unknown platform")
     raw = _public_key(cfg, key_alg, public_key_b64)
-    if store.enrollments_since(ip, int(time.time()) - 86400) >= number(settings, "enroll_per_ip_day"):
+    now = int(time.time())
+    network = source_key(ip)  # stored instead of the address: per-network limits, and less personal data kept
+    if store.enrollments_since(network, now - 86400) >= number(settings, "enroll_per_ip_day"):
         raise DeviceError(429, "rate_limited", "too many new devices from your network today")
+    if store.enrollments_since_any(now - 3600) >= number(settings, "enroll_per_hour"):
+        raise DeviceError(429, "busy", "many people are signing up right now; please try again in a few minutes")
     token = auth.new_token()
     try:
         device = store.create_vpn_device(new_subject(), auth.token_hash(token), platform, cfg.subnet,
-                                         set(cfg.reserved_addresses), ip)
+                                         set(cfg.reserved_addresses), network)
     except ValueError as exc:  # address pool exhausted
         raise DeviceError(503, "full", "the VPN server is full; please try again later") from exc
     try:

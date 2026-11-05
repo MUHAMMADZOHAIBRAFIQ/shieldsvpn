@@ -76,7 +76,8 @@ Normative details, byte layouts and the key schedule are in PROTOCOL.md.
 ### 3.2 DoS controls
 
 Cookies when half-open handshakes ≥ `cookie_threshold` (default 64) or always (`always_require_cookie`); cookie secret
-rotates every 120 s. Per-IP token bucket `handshake_rate_per_ip` (default 5/s, burst 2×). Reassembly bounded to 1024
+rotates every 120 s. Per-source token bucket `handshake_rate_per_ip` (default 5/s, burst 2×; one bucket per IPv4
+address or IPv6 /64). Reassembly bounded to 1024
 entries / 16 MiB. RESPONSE is never larger than INIT. RETRY/COOKIE limited to 4 per attempt.
 
 ### 3.3 Invariants
@@ -122,7 +123,8 @@ errors.** Secrets are referenced by path, never inlined. Templates: `deploy/exam
 | `rekey_interval` | 120 | 30–3600 |
 | `psk_file` | none | base64 of 32 bytes |
 | `[security] revoked_serials` | `[]` | lower-case hex |
-| `max_peers` / `cookie_threshold` / `always_require_cookie` / `handshake_rate_per_ip` | 1024 / 64 / false / 5 | |
+| `max_peers` / `cookie_threshold` / `always_require_cookie` / `handshake_rate_per_ip` | 1024 / 64 / false / 5 | the rate counts per IPv4 address / IPv6 /64 |
+| `log_peer_addresses` | false | true: clients' public IP:port appear in the log (connects, roaming, rejected handshakes) |
 | `[portal] database` | none | enables account-based access control |
 | `[portal] url` | `""` | pushed to clients ("Open portal") |
 
@@ -236,7 +238,8 @@ until they comply.
 | `toggle_ads`, `toggle_ad_gap` | `connect`, `0` | Free devices' interstitial after `connect`, after `both` connect and disconnect, or `off`; minimum seconds between two |
 | `admob_enabled`, `admob_require_ssv` | `0`, `1` | Android rewarded ads; `0` = test mode (trust the app's report) |
 | `web_ads_enabled`, `web_ads_test`, `reward_min_seconds` | `0`, `0`, `20` | Windows ad page; labelled placeholder ad; minimum viewing time |
-| `pro_device_limit`, `device_cleanup_days`, `enroll_per_ip_day` | `5`, `30`, `20` | devices per account; forget unused anonymous devices; registrations per IP per day |
+| `pro_device_limit`, `device_cleanup_days`, `enroll_per_ip_day` | `5`, `30`, `20` | devices per account; forget unused anonymous devices; registrations per network (IPv4 address / IPv6 /64) per day |
+| `enroll_per_hour` | `300` | registrations per hour from all networks together (bounds CA signing work) |
 | `payments_enabled`, `paddle_env` | `0`, `sandbox` | sell Pro; `sandbox` or `live` |
 | `paddle_product_id`, `pro_currency`, `paddle_client_token` | `""`, `USD` | Paddle product (`pro_…`) the Pro prices belong to; their currency; Paddle.js token (`test_…`/`live_…`) |
 | `pro_price_week`, `pro_price_month`, `pro_price_year` | `""` | Pro amounts set by the admin (e.g. `4.99`); empty = that period is not sold |

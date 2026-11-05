@@ -97,15 +97,17 @@ by default (Admin → Settings → Apps / Payments).
 
 * **Device registration without an account.** The app generates its ML-DSA key on the device and sends only the
   public key; the portal issues a certificate whose subject is a random device name (`d-` + 24 base32 chars) and a
-  256-bit bearer token stored only as a SHA-256 hash. Registrations are rate-limited per IP (per minute and per
-  day). ML-DSA public keys cannot be validated beyond their length, so a script could register keys it cannot use;
-  that costs only a tunnel address, which is freed after 30 days unused.
-* **The shared PSK is no longer secret once registration is on.** Every registered device receives the server's
-  PSK, so anyone can obtain it. Sessions stay protected by ML-KEM + X25519 and the certificates; only the PSK's
-  extra layer is lost, for every client. Dropping the PSK for app devices needs a server that accepts both — a
-  policy change, not a wire change — and is a later decision (PRD open question 4).
+  256-bit bearer token stored only as a SHA-256 hash. Registrations are rate-limited per network (an IPv4 address or
+  an IPv6 /64, since one IPv6 subscriber can use a fresh address per request), per minute and per day, plus a global
+  cap per hour (`enroll_per_hour`); the CA signs one certificate at a time. ML-DSA public keys cannot be validated
+  beyond their length, so a script could register keys it cannot use; each one holds a tunnel address until it is
+  freed after 30 days unused. With a /24 pool that is an exhaustion risk (docs/AUDIT-2026-11.md, finding C2).
+* **App devices get no PSK.** Anyone can register, so a PSK handed to devices would be public. `devices.bundle`
+  sends none; a server with a PSK accepts them with `[crypto] psk_optional = true`, and administrator-issued profiles
+  keep the PSK's extra layer.
 * **Free time is enforced by the VPN server**, not the app: `PortalAccess` refuses the handshake and drops live
-  sessions when `free_until` has passed. A modified app gains nothing.
+  sessions when the device's `free_seconds` balance reaches zero (it charges connected Free devices up to their last
+  packet). A modified app gains nothing.
 * **Proof of a watched ad.**
   * *Android (AdMob):* time is granted by Google's server-side-verification callback, whose ECDSA P-256 signature
     is checked with OpenSSL against Google's published keys (fetched only from the fixed `gstatic.com` URL). The
@@ -190,9 +192,24 @@ Open (need a deployment decision, not a code change):
 * **Slow-connection DoS on the stdlib HTTP server.** One thread per connection with a 30 s timeout; many slow
   clients can tie up threads. A reverse proxy with connection limits in front (once client IPs are passed through)
   is the usual answer.
-* TOTP secrets are stored unsealed in `portal.db` (password hashes are too); the database file must stay private.
+* ~~TOTP secrets are stored unsealed in `portal.db`~~ Fixed 2026-11-05: sealed with the vault (see below).
 * The desktop client accepts the addresses the server pushes without checking them against its certificate (the
   Android client checks). The server is authenticated, so this only matters for a compromised server.
+
+## Production-hardening audit of 2026-11-05
+
+The full report, with severities, the staged plan and the open blockers, is [AUDIT-2026-11.md](AUDIT-2026-11.md).
+Fixed in Phase 1 (regression tests in `tests/test_hardening.py`):
+
+| Finding | Severity | Fix |
+| --- | --- | --- |
+| The server logged every client's public IP:port at INFO on every handshake (every rekey, ~2 min) and a per-peer traffic line every minute, into a log that was never rotated. The privacy policy says live connection data is overwritten and removed at disconnect. | High (privacy) | Client addresses are logged only with `[security] log_peer_addresses = true` (default off). Rekeys log at DEBUG; the status line carries totals. |
+| Abuse limits counted IPv6 per address: one /64 gave an attacker unlimited sign-in, registration and handshake buckets. | High | `protocol.source_key`: IPv4 per address, IPv6 per /64, for the portal limiter, registrations (the /64 is what is stored) and the VPN's handshake limiter. |
+| Public registration had no global bound, and every registration costs a CA signature (SLH-DSA, ~0.3 s): a distributed burst could keep every core busy, starving the VPN on the same host. | Medium | `enroll_per_hour` (default 300) and one CA signature at a time (`CA.sign_slot`). |
+| 2FA seeds were stored in clear in `portal.db`; a leaked database or backup gave away every second factor. | Medium | Sealed with the vault (AES-256-GCM), associated data bound to the account id, re-sealed at start-up. |
+| `verify_totp` with an empty seed accepted codes computed under an empty HMAC key, which anyone can compute (not reachable before; any future read failure would have been). | Low | An empty seed never verifies. |
+| Secret files could only be named relative to the config. | Low | `${NAME}` in paths (e.g. systemd `LoadCredential=` → `${CREDENTIALS_DIRECTORY}/server.key`); an unset variable is a configuration error. |
+| A deleted account's devices kept their Free-time balance (stage 0). | Medium | `Store.delete_user` clears `free_seconds`. |
 
 ## Operational security checklist
 
