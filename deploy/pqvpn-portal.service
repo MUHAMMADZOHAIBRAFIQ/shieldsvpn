@@ -1,0 +1,41 @@
+# ShieldsVPN web portal (accounts, profiles, admin, app API). Internet-facing, so it runs as the
+# unprivileged `pqvpn` user with only the capability to bind the low TLS port.
+#   Installed by deploy/setup.sh to /etc/systemd/system/pqvpn-portal.service
+[Unit]
+Description=ShieldsVPN web portal
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pqvpn
+Group=pqvpn
+WorkingDirectory=/var/lib/pqvpn
+Environment=PYTHONPATH=/opt/shieldsvpn
+# Email (Nodemailer) is started as a short-lived `node` child; node must be on PATH (Debian 13: /usr/bin/node).
+#Environment=PQVPN_NODE=/usr/bin/node
+#Environment=PQVPN_LIBCRYPTO=/opt/ossl35/lib/libcrypto.so.3
+ExecStart=/usr/bin/python3 -m pqvpn portal -c /var/lib/pqvpn/portal.toml
+Restart=on-failure
+RestartSec=3
+
+# Serve TLS on 443 as a non-root user.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+LimitCORE=0
+# portal.db, the vault key and (with certbot) the TLS files live here:
+ReadWritePaths=/var/lib/pqvpn
+# Let's Encrypt live/archive, when the portal reads the cert from /etc/letsencrypt:
+ReadOnlyPaths=/etc/letsencrypt
+
+[Install]
+WantedBy=multi-user.target

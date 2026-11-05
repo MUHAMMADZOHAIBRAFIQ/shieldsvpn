@@ -1,22 +1,23 @@
-# /etc/systemd/system/pqvpn-server.service
-#   sudo cp -r server/ /etc/pqvpn && sudo cp -r pqvpn /opt/pqvpn/
-#   sudo systemctl daemon-reload && sudo systemctl enable --now pqvpn-server
+# ShieldsVPN VPN server (post-quantum data plane).
+#   Installed by deploy/setup.sh to /etc/systemd/system/pqvpn-server.service
+#   Code in /opt/shieldsvpn, data + configs in /var/lib/pqvpn (created by `pqvpn portal-init`).
 [Unit]
-Description=pqvpn post-quantum VPN server
+Description=ShieldsVPN post-quantum VPN server
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/etc/pqvpn
-Environment=PYTHONPATH=/opt/pqvpn
-# Only needed if the system OpenSSL is older than 3.5:
+WorkingDirectory=/var/lib/pqvpn
+Environment=PYTHONPATH=/opt/shieldsvpn
+# Debian 13 (trixie) has OpenSSL 3.5, so this is not needed. Uncomment on an older base image (e.g. Debian 12):
 #Environment=PQVPN_LIBCRYPTO=/opt/ossl35/lib/libcrypto.so.3
-ExecStart=/usr/bin/python3 -m pqvpn server -c /etc/pqvpn/server.toml
+ExecStart=/usr/bin/python3 -m pqvpn server -c /var/lib/pqvpn/server.toml
 Restart=on-failure
 RestartSec=3
 
-# Hardening: network admin only, read-only system, private /tmp, no core dumps
+# The server creates the TUN device, routes and (with nat_interface) NAT, so it needs network admin.
+# It runs as root for that; its data files are owned by the pqvpn user, which root can still read/write.
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
 NoNewPrivileges=yes
@@ -29,7 +30,7 @@ RestrictAddressFamilies=AF_INET AF_INET6 AF_NETLINK AF_UNIX
 LockPersonality=yes
 LimitCORE=0
 DeviceAllow=/dev/net/tun rw
-ReadWritePaths=/run /proc/sys/net
+ReadWritePaths=/var/lib/pqvpn /run /proc/sys/net
 
 [Install]
 WantedBy=multi-user.target
